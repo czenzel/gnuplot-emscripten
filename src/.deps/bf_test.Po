@@ -1,0 +1,49 @@
+bf_test.o: bf_test.c \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/ctype.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/__config \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/compat/ctype.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/ctype.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/features.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/bits/alltypes.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/stdio.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/stdio.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/math.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/compat/math.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/math.h \
+  ../config.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/stdlib.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/compat/stdlib.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/stdlib.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/alloca.h
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/ctype.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/__config:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/compat/ctype.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/ctype.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/features.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/bits/alltypes.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/stdio.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/stdio.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/math.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/compat/math.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/math.h:
+
+../config.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/stdlib.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/compat/stdlib.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/stdlib.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/alloca.h:

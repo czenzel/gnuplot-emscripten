@@ -1,0 +1,16 @@
+version.o: version.c version.h syscfg.h ../config.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/stdbool.h \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/__config \
+  /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/stdbool.h
+
+version.h:
+
+syscfg.h:
+
+../config.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/stdbool.h:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libcxx/__config:
+
+/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/system/include/libc/stdbool.h:
