@@ -73,9 +73,6 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 configure:3682: $? = 0
 configure:3671: /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/emcc -v >&5
 emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 1.37.0
-INFO:root:(Emscripten: Running sanity checks)
-WARNING:root:java does not seem to exist, required for closure compiler, which is optional (define JAVA in /home/czenzel/.emscripten if you want it)
-WARNING:root:closure compiler will not be available
 clang version 3.9.0 (https://github.com/kripken/emscripten-fastcomp-clang/ 60a7e9a9c22b67309e5b1258d38fadfa481a25d3) (https://github.com/kripken/emscripten-fastcomp/ 881bd352731d21c7117ad7e2ece347aacae83965) (emscripten 1.37.0 : 1.37.0)
 Target: x86_64-unknown-linux-gnu
 Thread model: posix
@@ -83,6 +80,9 @@ InstalledDir: /mnt/c/Users/chris/Linux/emsdk_portable/clang/fastcomp/build_maste
 Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8
 Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8.4
 Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9.3
+Selected GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8
+Candidate multilib: .;@m64
 ... rest of stderr output deleted ...
 configure:3682: $? = 0
 configure:3671: /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/emcc -V >&5
@@ -95,10 +95,6 @@ note that input files without a known suffix are ignored, make sure your input f
 configure:3682: $? = 1
 configure:3702: checking whether the C compiler works
 configure:3724: /mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/emcc    conftest.c  >&5
-INFO:root:generating system library: libc.bc... (this will be cached in "/home/czenzel/.emscripten_cache/asmjs/libc.bc" for subsequent builds)
-INFO:root: - ok
-INFO:root:generating system library: dlmalloc.bc... (this will be cached in "/home/czenzel/.emscripten_cache/asmjs/dlmalloc.bc" for subsequent builds)
-INFO:root: - ok
 configure:3728: $? = 0
 configure:3776: result: yes
 configure:3779: checking for C compiler default output file name
@@ -999,7 +995,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpGoN9_c.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpQsh5vE.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -1076,7 +1072,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp6IePa2.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpvzohlF.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -1178,7 +1174,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpseowD6.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp1rsDpl.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -2495,7 +2491,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpqjRJ1j.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpWfZVb8.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -2601,7 +2597,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpNUVOaY.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpsEjfOX.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -2943,7 +2939,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpOOfbVc.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp_Wnda6.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -3184,7 +3180,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp1p7A8n.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpfGW3ec.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -3360,7 +3356,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpIAj2Gm.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpzQ8qMO.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -3582,7 +3578,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp5aKFWd.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpMEbkxf.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -3753,7 +3749,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpyA7ieN.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpBnJEAg.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -3915,7 +3911,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpCns_ta.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpOXKniA.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -4092,7 +4088,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpEEID58.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpDPBQCa.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -4274,7 +4270,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpDis_Wu.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpVVPNY5.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -4426,7 +4422,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpCxTF5d.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpJC_Q8B.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -4576,7 +4572,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpjFJ8Rl.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpZnSJ1K.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -4726,7 +4722,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpB5qSMF.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp_4awC2.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -4876,7 +4872,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpVak0JT.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpMWaX1M.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -5026,7 +5022,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpT1OWDk.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpjO0VgE.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -5176,7 +5172,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpa7L0es.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpEFY7GV.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -5326,7 +5322,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp25vjIk.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpcY6cnK.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -5476,7 +5472,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpUeRHku.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpgG1e1M.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -5624,7 +5620,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpBEBBNK.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp5ok2tR.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -5773,7 +5769,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpOd3HHs.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpBC4Lg0.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -5922,7 +5918,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp7GR0KP.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmppKWYgd.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -6072,7 +6068,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp977qL_.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp8nUG9H.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -6222,7 +6218,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpqkuu0N.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpchaN51.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -6373,7 +6369,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpmf8rJu.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp_kRdix.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -6523,7 +6519,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp8nUnI0.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmph42bNW.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -6690,7 +6686,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpgCoxNj.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmppS73_Y.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -6850,7 +6846,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmp1x_9Aw.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpsK7OSq.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -7027,7 +7023,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpj2tDwc.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpBYc2kr.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -7183,7 +7179,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpFShwvJ.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpLXo9TK.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -7339,7 +7335,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpwzPfCe.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpyXHf2x.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -7497,7 +7493,7 @@ Traceback (most recent call last):
     cwd=path_from_root('src'), error_limit=300)
   File "/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/tools/jsrun.py", line 122, in run_js
     raise Exception('Expected the command ' + str(command) + ' to finish with return code ' + str(assert_returncode) + ', but it returned with code ' + str(proc.returncode) + ' instead! Output: ' + str(ret)[:error_limit])
-Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpX0kG1V.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
+Exception: Expected the command ['/mnt/c/Users/chris/Linux/emsdk_portable/node/4.1.1_64bit/bin/node', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/compiler.js', '/tmp/tmpZkdcub.txt', '/mnt/c/Users/chris/Linux/emsdk_portable/emscripten/master/src/library_pthread_stub.js'] to finish with return code 0, but it returned with code 1 instead! Output: // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
 // closure compiler if necessary. There are various ways Module can be used:
 // 1. Not defined. We create it here
@@ -8007,6 +8003,7 @@ config.status:1053: creating src/qtterminal/Makefile
 config.status:1053: creating term/Makefile
 config.status:1053: creating tutorial/Makefile
 config.status:1053: creating config.h
+config.status:1234: config.h is unchanged
 config.status:1282: executing depfiles commands
 config.status:1282: executing default commands
 configure:16342: result: 

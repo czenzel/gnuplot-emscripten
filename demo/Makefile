@@ -368,7 +368,7 @@ bldg.png GM1_bonds.r3d blutux.rgb lena.rgb sound.par sound2.par start.par \
 gnuplot.rot gnu-valley random-points gpdemos.tcl html 
 
 #PLUGIN_DIR = plugin
-all: #all-recursive
+all: all-recursive
 
 .SUFFIXES:
 $(srcdir)/Makefile.in: # $(srcdir)/Makefile.am  $(am__configure_deps)
@@ -675,7 +675,7 @@ uninstall-am:
 	uninstall-am
 
 
-all: #$(BINARY_FILES)
+all: # $(BINARY_FILES)
 
 $(BINARY_FILES): ../src/bf_test
 	@echo Creating binary data files

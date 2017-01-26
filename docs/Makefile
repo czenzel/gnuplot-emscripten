@@ -481,7 +481,7 @@ doc2ipf_SOURCES = doc2ipf.c termdoc.c xref.c
 doc2rtf_SOURCES = doc2rtf.c termdoc.c xref.c
 doc2rnh_SOURCES = doc2rnh.c termdoc.c
 checkdoc_SOURCES = checkdoc.c termdoc.c gnuplot.doc
-all: $(BUILT_SOURCES)
+all: #$(BUILT_SOURCES)
 #	$(MAKE) $(AM_MAKEFLAGS) all-am
 
 .SUFFIXES:
