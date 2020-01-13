@@ -56,15 +56,7 @@ extern FILE *gpoutfile;
 extern struct termentry *term;
 
 /* for use by all drivers */
-#ifndef NEXT
 #define sign(x) ((x) >= 0 ? 1 : -1)
-#else
-/* it seems that sign as macro causes some conflict with precompiled headers */
-static int sign(int x)
-{
-    return x >= 0 ? 1 : -1;
-}
-#endif /* NEXT */
 
 /* abs as macro is now uppercase, there are conflicts with a few C compilers
    that have abs as macro, even though ANSI defines abs as function

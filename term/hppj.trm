@@ -280,6 +280,7 @@ START_HELP(hppj)
 "?terminal hppj",
 "?term hppj",
 "?hppj",
+" Note: only available if gnuplot is configured --with-bitmap-terminals.",
 " The `hppj` terminal driver supports the HP PaintJet and HP3630 printers.  The",
 " only option is the choice of font.",
 "",

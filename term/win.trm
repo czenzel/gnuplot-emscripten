@@ -1,7 +1,3 @@
-/* Hello, Emacs, this is -*-C-*-
- * $Id: win.trm,v 1.126.2.6 2014/12/18 14:57:26 broeker Exp $
- */
-
 /* GNUPLOT - win.trm */
 
 /*[
@@ -40,6 +36,9 @@
  *
  *   Gnuplot for Windows:
  *       Maurice Castro, Russell Lang
+ *
+ *   Current maintainer:
+ *       Bastian Maerkisch
  *
  */
 
@@ -116,6 +115,8 @@ TERM_PUBLIC void WIN_modify_plots __PROTO((unsigned int operations, int plotno))
 #ifdef TERM_BODY
 
 #include <windows.h>
+#include <tchar.h>
+#include <wchar.h>
 #include "win/winmain.h"
 
 
@@ -123,8 +124,10 @@ TERM_PUBLIC void WIN_modify_plots __PROTO((unsigned int operations, int plotno))
 
 enum WIN_id { WIN_DEFAULT, WIN_MONOCHROME, WIN_COLOR, WIN_GTITLE,
 	      WIN_ENHANCED, WIN_NOENHANCED, WIN_FONT, WIN_SIZE, WIN_WSIZE,
-	      WIN_POSITION, WIN_CLOSE, WIN_BACKGROUND, WIN_FONTSCALE,
-	      WIN_LINEWIDTH, WIN_SOLID, WIN_DASHED, WIN_ROUND, WIN_BUTT,
+	      WIN_POSITION, WIN_CLOSE, WIN_BACKGROUND,
+	      WIN_FONTSCALE, WIN_LINEWIDTH, WIN_POINTSCALE,
+	      WIN_SOLID, WIN_DASHED, WIN_ROUND, WIN_BUTT,
+	      WIN_DOCKED, WIN_STANDALONE, WIN_LAYOUT,
 	      WIN_OTHER };
 
 static struct gen_table WIN_opts[] =
@@ -144,18 +147,68 @@ static struct gen_table WIN_opts[] =
     { "fonts$cale", WIN_FONTSCALE },
     { "linewidth", WIN_LINEWIDTH },
     { "lw", WIN_LINEWIDTH },
+    { "pointscale", WIN_POINTSCALE},
+    { "ps", WIN_POINTSCALE},
     { "ti$tle", WIN_GTITLE },
     { "siz$e", WIN_SIZE },
     { "ws$ize", WIN_WSIZE },
     { "pos$ition", WIN_POSITION },
     { "cl$ose", WIN_CLOSE },
+    { "dock$ed", WIN_DOCKED },
+    { "standalone", WIN_STANDALONE },
+    { "lay$out", WIN_LAYOUT },
     { NULL, WIN_OTHER }
 };
 
+typedef struct {
+	unsigned n;
+	unsigned max;
+	POINT * point;
+} path_points;
+
 static int WIN_last_linetype = LT_NODRAW; /* HBB 20000813: linetype caching */
 termentry * WIN_term = NULL;
-char WIN_inifontname[MAXFONTNAME] = WINFONT;
+TCHAR WIN_inifontname[MAXFONTNAME] = TEXT(WINFONT);
 int WIN_inifontsize = WINFONTSIZE;
+static path_points WIN_poly = {0, 0, NULL};
+
+static void WIN_add_path_point(path_points * poly, int x, int y);
+static void WIN_flush_line(path_points * poly);
+static TBOOLEAN WIN_docked = FALSE;  /* docked window option is "sticky" */
+
+
+static void
+WIN_add_path_point(path_points * poly, int x, int y)
+{
+	/* Enlarge size of array of polygon points */
+	if (poly->n >= poly->max) {
+		poly->max += 10;
+		poly->point = (POINT *) gp_realloc(poly->point, poly->max * sizeof(POINT), "points");
+	}
+	/* Store point */
+	poly->point[poly->n].x = x;
+	poly->point[poly->n].y = y;
+	poly->n++;
+	FPRINTF((stderr, "new polygon/polyline point: %i %i\n", x, y));
+}
+
+
+static void
+WIN_flush_line(path_points * poly)
+{
+	if (poly) {
+		if (poly->n > 1)
+			GraphOpSize(graphwin, W_polyline, poly->n, 0, (void *) poly->point, poly->n * sizeof(POINT));
+		if (poly->n > 0) {
+			/* Save last path point in case there's a vector command without preceeding move. */
+			poly->point[0].x = poly->point[poly->n - 1].x;
+			poly->point[0].y = poly->point[poly->n - 1].y;
+			/* Reset counter */
+			poly->n = 0;
+		}
+	}
+}
+
 
 TERM_PUBLIC void
 WIN_options()
@@ -168,9 +221,15 @@ WIN_options()
 	TBOOLEAN set_linewidth = FALSE, set_size = FALSE;
 	TBOOLEAN set_position = FALSE, set_number = FALSE;
 	TBOOLEAN set_wsize = FALSE, set_rounded = FALSE;
+	TBOOLEAN set_docked = FALSE;
+#ifndef WGP_CONSOLE
+	TBOOLEAN set_layout = FALSE;
+#endif
+	TBOOLEAN set_pointscale = FALSE;
 	TBOOLEAN color, dashed, rounded;
 	COLORREF background;
 	double fontscale, linewidth;
+	double pointscale;
 	int win_x = 0;
 	int win_y = 0;
 	int win_width = 0;
@@ -179,6 +238,7 @@ WIN_options()
 	int fontsize;
 	char fontname[MAXFONTNAME];
 	int window_number;
+	unsigned dock_cols, dock_rows;
 
 	while (!END_OF_COMMAND) {
 		switch (lookup_table(&WIN_opts[0], c_token)) {
@@ -186,12 +246,16 @@ WIN_options()
 			color = TRUE;
 			dashed = FALSE;
 			rounded = FALSE;
+#ifdef UNICODE
+			WideCharToMultiByte(CP_ACP, 0, WIN_inifontname, -1, fontname, MAXFONTNAME, 0, 0);
+#else
 			strcpy(fontname, WIN_inifontname);
+#endif
 			fontsize = WIN_inifontsize;
-			fontscale = linewidth = 1;
+			fontscale = linewidth = pointscale = 1;
 			set_color = set_dashed = TRUE;
 			set_font = set_fontsize = TRUE;
-			set_fontscale = set_linewidth = TRUE;
+			set_fontscale = set_linewidth = set_pointscale = TRUE;
 			set_rounded = TRUE;
 			c_token++;
 			break;
@@ -239,6 +303,12 @@ WIN_options()
 			set_linewidth = TRUE;
 			break;
 		}
+		case WIN_POINTSCALE:
+			c_token++;
+			pointscale = real_expression();
+			if (pointscale <= 0.0) pointscale = 1.;
+			set_pointscale = TRUE;
+			break;
 		case WIN_SOLID:
 			c_token++;
 			dashed = FALSE;
@@ -260,16 +330,21 @@ WIN_options()
 			set_rounded = TRUE;
 			break;
 		case WIN_SIZE: {
+		        double insize; /* shige 2019-02-27 for size 0 */
 			c_token++;
 			if (set_wsize)
 				int_error(c_token, "conflicting size options");
 			if (END_OF_COMMAND)
 				int_error(c_token,"size requires 'width,heigth'");
-			win_width = real_expression();
+			if ((insize = real_expression()) >= 1)
+				win_width = insize;
+			else
+				int_error(c_token, "size is out of range");
 			if (!equals(c_token++,","))
 				int_error(c_token,"size requires 'width,heigth'");
-			win_height = real_expression();
-			if (win_width < 1 || win_height < 1)
+			if ((insize = real_expression()) >= 1)
+				win_height = insize;
+			else
 				int_error(c_token, "size is out of range");
 			set_size = TRUE;
 			break;
@@ -343,6 +418,45 @@ WIN_options()
 				fontsize = int_expression();
 			}
 			break;
+		case WIN_DOCKED:
+			c_token++;
+			if (!graphwin->bDocked && GraphHasWindow(graphwin))
+				int_error(c_token, "Cannot change the mode of an open window.");
+			if (persist_cl) {
+				fprintf(stderr, "Warning: cannot use docked graphs in persist mode\n");
+			} else {
+				set_docked = TRUE;
+				WIN_docked = TRUE;
+			}
+			break;
+		case WIN_STANDALONE:
+			c_token++;
+			if (graphwin->bDocked && GraphHasWindow(graphwin))
+				int_error(c_token, "Cannot change the mode of an open window.");
+			set_docked = TRUE;
+			WIN_docked = FALSE;
+			break;
+		case WIN_LAYOUT:
+			c_token++;
+			dock_rows = int_expression();
+			if (END_OF_COMMAND || !equals(c_token, ","))
+				int_error(c_token, "expecting ', <num_cols>'");
+			if (dock_rows == 0) {
+				dock_rows = 1;
+				fprintf(stderr, "Warning: layout requires at least one row.\n");
+			}
+			c_token++;
+			if (END_OF_COMMAND)
+				int_error(c_token, "expecting <num_cols>");
+			dock_cols = int_expression();
+			if (dock_cols == 0) {
+				dock_cols = 1;
+				fprintf(stderr, "Warning: layout requires at least one column.\n");
+			}
+#ifndef WGP_CONSOLE
+			set_layout = TRUE;
+#endif
+			break;
 		case WIN_OTHER:
 		default:
 			window_number = int_expression();
@@ -362,6 +476,7 @@ WIN_options()
 			lpgw->next = calloc(1, sizeof(GW));
 			lpgw = lpgw->next;
 			lpgw->Id = window_number;
+			lpgw->bDocked = WIN_docked; /* "sticky" default */
 		}
 #ifdef USE_MOUSE
 		/* set status line of previous graph window */
@@ -392,32 +507,62 @@ WIN_options()
 		graphwin->fontscale = fontscale;
 	if (set_linewidth)
 		graphwin->linewidth = linewidth;
+	if (set_pointscale)
+		graphwin->pointscale = pointscale;
 	if (set_size || set_wsize) {
 		graphwin->Size.x = win_width;
 		graphwin->Size.y = win_height;
 	}
-	if (set_size) {
-		graphwin->Canvas.x = win_width;
-		graphwin->Canvas.y = win_height;
+#ifdef WGP_CONSOLE
+	if (set_docked && WIN_docked)
+		WIN_docked = FALSE; /* silently ignore docked option for console mode gnuplot */
+#endif
+	if (!WIN_docked) {
+		if (set_docked)
+			graphwin->bDocked = WIN_docked;
+		if (set_size) {
+			graphwin->Canvas.x = win_width;
+			graphwin->Canvas.y = win_height;
+		}
+		if (set_wsize) {
+			graphwin->Canvas.x = 0;
+			graphwin->Canvas.y = 0;
+		}
+		if (set_position) {
+			graphwin->Origin.x = win_x;
+			graphwin->Origin.y = win_y;
+		}
+	} else {
+		if (set_docked)
+			graphwin->bDocked = WIN_docked;
 	}
-	if (set_wsize) {
-		graphwin->Canvas.x = 0;
-		graphwin->Canvas.y = 0;
+#ifndef WGP_CONSOLE
+	if (set_layout) {
+		textwin.nDockRows = dock_rows;
+		textwin.nDockCols = dock_cols;
 	}
-	if (set_position) {
-		graphwin->Origin.x = win_x;
-		graphwin->Origin.y = win_y;
-	}
+#endif
 	if (set_title) {
 		free (graphwin->Title);
+#ifdef UNICODE
+		graphwin->Title = (title) ?  UnicodeText(title, encoding) : _tcsdup(WINGRAPHTITLE);
+#else
 		graphwin->Title = (title) ?  title : strdup(WINGRAPHTITLE);
+#endif
 		GraphChangeTitle(graphwin);
 	}
 	if (set_fontsize)
 		graphwin->deffontsize = graphwin->fontsize = fontsize;
 	if (set_font) {
+#ifdef UNICODE
+		LPWSTR wfontname = UnicodeText(fontname, encoding);
+		wcscpy(graphwin->fontname, wfontname);
+		wcscpy(graphwin->deffontname, wfontname);
+		free(wfontname);
+#else
 		strcpy(graphwin->fontname, fontname);
 		strcpy(graphwin->deffontname, fontname);
+#endif
 	}
 	/* font initialization */
 	WIN_set_font(NULL);
@@ -428,6 +573,13 @@ WIN_options()
 		win_close_terminal_window(graphwin);
 		return;
 	}
+
+#ifndef WGP_CONSOLE
+	/* update text window */
+	if (set_layout) {
+		DockedUpdateLayout(&textwin);
+	}
+#endif
 
 	/* update graph window */
 	if ((set_position || set_size || set_wsize) && GraphHasWindow(graphwin))
@@ -444,23 +596,33 @@ WIN_update_options()
 	TBOOLEAN set_font = FALSE, set_fontsize = FALSE;
 
 	/* update term_options */
-	sprintf(term_options, "%i %s %s %s %s",
+	sprintf(term_options, "%i %s %s %s %s %s",
 		graphwin->Id,
 		graphwin->color ? "color" : "monochrome",
 		graphwin->dashed ? "dashed" : "solid",
 		graphwin->rounded ? "rounded" : "butt",
-		term->flags & TERM_ENHANCED_TEXT ? "enhanced" : "noenhanced");
+		term->flags & TERM_ENHANCED_TEXT ? "enhanced" : "noenhanced",
+		graphwin->bDocked ? "docked" : "standalone");
+
+#ifndef WGP_CONSOLE
+	if (graphwin->bDocked) {
+		char buf[128];
+		sprintf(buf, " layout %i,%i", textwin.nDockRows, textwin.nDockCols);
+		strcat(term_options, buf);
+	}
+#endif
 
 	set_fontsize = (graphwin->deffontsize != WIN_inifontsize);
-	set_font = (strcmp(graphwin->deffontname, WIN_inifontname) != 0);
+	set_font = (_tcscmp(graphwin->deffontname, WIN_inifontname) != 0);
 	if (set_font || set_fontsize) {
-		char * fontstring = (char*) gp_alloc(strlen(graphwin->fontname) + 25, "win font");
-		if (!set_fontsize)
-			sprintf(fontstring, " font \"%s\"", graphwin->deffontname);
-		else
-			sprintf(fontstring, " font \"%s, %d\"",
-				set_font ? graphwin->deffontname : "", graphwin->deffontsize);
-		strcat (term_options, fontstring);
+		char * fontstring = (char *) gp_alloc(_tcslen(graphwin->deffontname) + 24, "win font");
+		if (!set_fontsize) {
+			sprintf(fontstring, " font \"" TCHARFMT "\"", graphwin->deffontname);
+		} else {
+			sprintf(fontstring, " font \"" TCHARFMT ", %d\"",
+				set_font ? graphwin->deffontname : TEXT(""), graphwin->deffontsize);
+		}
+		strcat(term_options, fontstring);
 		free(fontstring);
 	}
 
@@ -477,12 +639,18 @@ WIN_update_options()
 		sprintf(&(term_options[strlen(term_options)]),
 			" linewidth %.1f", graphwin->linewidth);
 
-	if (graphwin->Canvas.x != 0)
+	if (graphwin->pointscale != 1)
 		sprintf(&(term_options[strlen(term_options)]),
-			" size %i,%i", graphwin->Canvas.x, graphwin->Canvas.y);
-	else if (graphwin->Size.x != CW_USEDEFAULT)
-		sprintf(&(term_options[strlen(term_options)]),
-			" wsize %i,%i", graphwin->Size.x, graphwin->Size.y);
+			" pointscale %.1f", graphwin->pointscale);
+
+	if (!graphwin->bDocked) {
+		if (graphwin->Canvas.x != 0)
+			sprintf(&(term_options[strlen(term_options)]),
+				" size %li,%li", graphwin->Canvas.x, graphwin->Canvas.y);
+		else if (graphwin->Size.x != CW_USEDEFAULT)
+			sprintf(&(term_options[strlen(term_options)]),
+				" wsize %li,%li", graphwin->Size.x, graphwin->Size.y);
+	}
 }
 
 
@@ -510,7 +678,8 @@ WIN_reset()
 TERM_PUBLIC void
 WIN_text()
 {
-    GraphEnd(graphwin);
+	WIN_flush_line(&WIN_poly);
+	GraphEnd(graphwin);
 }
 
 
@@ -533,14 +702,29 @@ WIN_graphics()
 TERM_PUBLIC void
 WIN_move(unsigned int x, unsigned int y)
 {
-	GraphOp(graphwin, W_move, x, y, NULL);
+	/* terminate current path only if we move to a disconnected position */
+	if ((WIN_poly.n > 0) &&
+		((WIN_poly.point[WIN_poly.n - 1].x != x) ||
+		 (WIN_poly.point[WIN_poly.n - 1].y != y))) {
+			WIN_flush_line(&WIN_poly);
+	}
+	WIN_add_path_point(&WIN_poly, x, y);
 }
 
 
 TERM_PUBLIC void
 WIN_vector(unsigned int x, unsigned int y)
 {
-	GraphOp(graphwin, W_vect, x, y, NULL);
+	if ((WIN_poly.n == 0) ||
+	    (WIN_poly.point[WIN_poly.n - 1].x != x) ||
+	    (WIN_poly.point[WIN_poly.n - 1].y != y)) {
+		if (WIN_poly.n == 0) {
+			/* vector command without preceeding move: e.g. in "with line lc variable" */
+			/* Coordinates were saved with last flush already. */
+			WIN_poly.n++;
+		}
+		WIN_add_path_point(&WIN_poly, x, y);
+	}
 }
 
 
@@ -548,6 +732,8 @@ TERM_PUBLIC void
 WIN_linetype(int lt)
 {
 	if (lt != WIN_last_linetype) {
+		WIN_flush_line(&WIN_poly);
+
 		GraphOp(graphwin, W_line_type, lt, 0, NULL);
 		WIN_last_linetype = lt;
 	}
@@ -557,6 +743,8 @@ WIN_linetype(int lt)
 TERM_PUBLIC void
 WIN_dashtype(int dt, t_dashtype *custom_dash_pattern)
 {
+	WIN_flush_line(&WIN_poly);
+
 	GraphOpSize(graphwin, W_dash_type, dt, 0, (char *) custom_dash_pattern, sizeof(t_dashtype));
 }
 
@@ -564,6 +752,8 @@ WIN_dashtype(int dt, t_dashtype *custom_dash_pattern)
 TERM_PUBLIC void
 WIN_put_text(unsigned int x, unsigned int y, const char *str)
 {
+	WIN_flush_line(&WIN_poly);
+
 	if ((str == NULL) || !strlen(str)) return;
 
 	/* If no enhanced text processing is needed, we can use the plain  */
@@ -595,6 +785,8 @@ WIN_text_angle(int ang)
 TERM_PUBLIC void
 WIN_point(unsigned int x, unsigned int y, int number)
 {
+	WIN_flush_line(&WIN_poly);
+
 	/* draw point shapes later to save memory */
 	/* HBB 20010411: secure against pointtype -1 or lower */
 	if (number < -1)
@@ -625,6 +817,9 @@ WIN_set_pointsize(double s)
 TERM_PUBLIC void
 WIN_linewidth(double linewidth)
 {
+	// TODO: line width caching
+	WIN_flush_line(&WIN_poly);
+
 	WIN_last_linetype = LT_NODRAW;        /* invalidate cached linetype */
 	GraphOp(graphwin, W_line_width, (int) 100 * linewidth, 0, NULL);
 }
@@ -690,6 +885,8 @@ WIN_image(unsigned int M, unsigned int N, coordval *image,
 	PBYTE rgb_image;
 	unsigned int image_size;
 	unsigned int pad_bytes;
+
+	WIN_flush_line(&WIN_poly);
 
 	/* BM: IC_PALETTE, IC_RGB and IC_RGBA images are converted to a format
 	   suitable for Windows:
@@ -761,7 +958,7 @@ WIN_image(unsigned int M, unsigned int N, coordval *image,
 			}
 			rgb_image -= 4 * M;
 		}
-    }
+	}
 
 	/* squeeze all the information into the buffer */
 	if ((color_mode == IC_PALETTE) || (color_mode == IC_RGB) || (color_mode == IC_RGBA)) {
@@ -795,6 +992,9 @@ WIN_make_palette(t_sm_palette *palette)
 TERM_PUBLIC void
 WIN_set_color(t_colorspec *colorspec)
 {
+	// TODO: color caching
+	WIN_flush_line(&WIN_poly);
+
 	switch (colorspec->type ) {
 		case TC_FRAC: {
 			/* Immediately translate palette index to RGB colour */
@@ -818,6 +1018,8 @@ WIN_set_color(t_colorspec *colorspec)
 TERM_PUBLIC void
 WIN_filled_polygon(int points, gpiPoint *corners)
 {
+	int i;
+
 	GraphOp(graphwin, W_fillstyle, corners->style, 0, NULL);
 
 	/* Eliminate duplicate polygon points. */
@@ -825,12 +1027,9 @@ WIN_filled_polygon(int points, gpiPoint *corners)
 	    (corners[0].y == corners[points - 1].y))
 		points--;
 
-	{
-		int i;
-		for (i = 0; i < points; i++)
-			GraphOp(graphwin, W_filled_polygon_pt, corners[i].x, corners[i].y, NULL);
-		GraphOp(graphwin, W_filled_polygon_draw, points, 0, NULL);
-	}
+	for (i = 0; i < points; i++)
+		GraphOp(graphwin, W_filled_polygon_pt, corners[i].x, corners[i].y, NULL);
+	GraphOp(graphwin, W_filled_polygon_draw, points, 0, NULL);
 }
 
 
@@ -840,6 +1039,8 @@ WIN_boxfill(
     unsigned int xleft, unsigned int ybottom,
     unsigned int width, unsigned int height)
 {
+	WIN_flush_line(&WIN_poly);
+
 	/* split into multiple commands to squeeze through all the necessary info */
 	GraphOp(graphwin, W_fillstyle, style, 0, NULL);
 	GraphOp(graphwin, W_move, xleft, ybottom, NULL);
@@ -905,11 +1106,13 @@ WIN_enhanced_flush()
 TERM_PUBLIC void
 WIN_layer(t_termlayer syncpoint)
 {
+	WIN_flush_line(&WIN_poly);
+
 	/* ignore LAYER_RESET in multiplot mode */
-    if (((syncpoint == TERM_LAYER_RESET) ||
+	if (((syncpoint == TERM_LAYER_RESET) ||
 	     (syncpoint == TERM_LAYER_RESET_PLOTNO)) &&
 		multiplot)
-				return;
+		return;
 	GraphOp(graphwin, W_layer, syncpoint, 0, NULL);
 }
 
@@ -917,6 +1120,7 @@ WIN_layer(t_termlayer syncpoint)
 TERM_PUBLIC void
 WIN_hypertext(int type, const char * text)
 {
+	WIN_flush_line(&WIN_poly);
 	GraphOp(graphwin, W_hypertext, type, 0, text);
 }
 
@@ -934,10 +1138,7 @@ WIN_boxed_text(unsigned int x, unsigned int y, int option)
 TERM_PUBLIC void
 WIN_modify_plots(unsigned int operations, int plotno)
 {
-	/* Not implemented yet */
-	if (plotno >= 0) return;
-
-	GraphModifyPlots(graphwin, operations);
+	GraphModifyPlots(graphwin, operations, plotno);
 }
 
 #endif /* TERM_BODY */
@@ -953,7 +1154,7 @@ TERM_TABLE_START(win_driver)
     WIN_justify_text, WIN_point, do_arrow, WIN_set_font,
     WIN_set_pointsize,
     TERM_CAN_MULTIPLOT|TERM_NO_OUTPUTFILE|TERM_ALPHA_CHANNEL|TERM_CAN_DASH
-        |TERM_LINEWIDTH|TERM_FONTSCALE | TERM_ENHANCED_TEXT,
+        |TERM_LINEWIDTH|TERM_FONTSCALE|TERM_POINTSCALE|TERM_ENHANCED_TEXT,
     WIN_text /* suspend */ , WIN_resume,
     WIN_boxfill, WIN_linewidth,
 #ifdef USE_MOUSE
@@ -971,11 +1172,11 @@ TERM_TABLE_START(win_driver)
     WIN_layer,
     0, /* no term->path */
     0.0, /* Scale (unused) */
-    WIN_hypertext
+    WIN_hypertext,
 #ifdef EAM_BOXED_TEXT
-    , WIN_boxed_text
+    WIN_boxed_text,
 #endif
-    , WIN_modify_plots, WIN_dashtype
+    WIN_modify_plots, WIN_dashtype
 TERM_TABLE_END(win_driver)
 
 #undef LAST_TERM
@@ -994,8 +1195,8 @@ START_HELP(windows)
 "?term windows",
 "?windows",
 " The `windows` terminal is a fast interactive terminal driver that uses the",
-" Windows GDI to draw and write text. The cross-platform `terminal wxt` is also",
-" supported on Windows.",
+" Windows GDI to draw and write text. The cross-platform `terminal wxt` and",
+" `terminal qt` are also supported on Windows.",
 "",
 " Syntax:",
 "       set terminal windows {<n>}",
@@ -1006,10 +1207,12 @@ START_HELP(windows)
 "                            {font <fontspec>}",
 "                            {fontscale <scale>}",
 "                            {linewdith <scale>}",
+"                            {pointscale <scale>}",
 "                            {background <rgb color>}",
 "                            {title \"Plot Window Title\"}",
 "                            {{size | wsize} <width>,<height>}",
 "                            {position <x>,<y>}",
+"                            {docked {layout <rows>,<cols>} | standalone}",
 "                            {close}",
 "",
 " Multiple plot windows are supported: `set terminal win <n>` directs the",
@@ -1028,8 +1231,8 @@ START_HELP(windows)
 " Note that in previous versions of gnuplot the `font` statement could be left",
 " out and <fontsize> could be given as a number without double quotes. This is",
 " no longer supported.",
-" `linewidth` and `fontscale` can be used to scale the width of lines and",
-" the size of text.",
+" `linewidth`, `fontscale`, `pointscale` can be used to scale the width of",
+" lines, the size of text, or the size of the point symbols.",
 " `title` changes the title of the graph window.",
 " `size` defines the width and height of the window's drawing area in pixels,",
 " `wsize` defines the actual size of the window itself and `position` defines",
@@ -1037,9 +1240,18 @@ START_HELP(windows)
 " screen (again in pixel). These options override any default settings",
 " from the `wgnuplot.ini` file.",
 "",
+" `docked` embeds the graph window in the wgnuplot text window and the `size`",
+" and `position` options are ignored.  Note that `docked` is not available for",
+" console-mode gnuplot.  Setting this option changes the default for new"
+" windows.  The initial default is `standalone`.  The `layout` option allows to",
+" reserve a minimal number of columns and rows for graphs in docked mode.  If",
+" there are more graphs than fit the given layout, additional rows will be added.",
+" Graphs are sorted by the numerical id, filling rows first.",
+"",
 " Other options may be changed using the `graph-menu` or the initialization file",
 " `wgnuplot.ini`.",
 "",
+/* FIXME:  Move to persist section */
 " The Windows version normally terminates immediately as soon as the end of",
 " any files given as command line arguments is reached (i.e. in non-interactive",
 " mode), unless you specify `-` as the last command line option.",
@@ -1064,33 +1276,49 @@ START_HELP(windows)
 "?graph-menu",
 " The `gnuplot graph` window has the following options on a pop-up menu",
 " accessed by pressing the right mouse button(*) or selecting `Options` from the",
-" system menu:",
+" system menu or the toolbar:",
 "",
-" `Copy to Clipboard` copies a bitmap and an enhanced Metafile picture.",
+" `Copy to Clipboard` copies a bitmap and an enhanced metafile picture.",
 "",
-" `Save as EMF...` allows the user to save the current graph window as enhanced metafile",
+" `Save as EMF...` allows the user to save the current graph window as",
+" enhanced metafile (EMF or EMF+).",
+"",
+" `Save as Bitmap...` allows the user to save a copy of the graph as bitmap",
+" file.",
 "",
 " `Print...` prints the graphics windows using a Windows printer driver and",
-" allows selection of the printer and scaling of the output.  The output",
-" produced by `Print` is not as good as that from `gnuplot`'s own printer",
-" drivers. See also `windows printing`.",
+" allows selection of the printer and scaling of the output."
+" See also `windows printing`.",
 "",
-" `Bring to Top` when checked brings the graph window to the top after every",
+" `Bring to Top` when checked raises the graph window to the top after every",
 " plot.",
 "",
-" `Color` when checked enables color linestyles.  When unchecked it forces",
-" monochrome linestyles.",
+" `Color` when checked enables color output.  When unchecked it forces",
+" all grayscale output.  This is e.g. useful to test appearance of monochrome",
+" printouts.",
 "",
-" `Double buffer` activates drawing into a memory buffer before copying the",
-" graph to the screen. This avoids flickering e.g. during animation and",
-" rotation of 3d graphs. See `mouse` and `scrolling`.",
+" `GDI backend` draws to the screen using Windows GDI. This is the classical",
+" windows terminal, which is fast, but lacks many features such as",
+" anti-aliasing, oversampling and full transparency support. It is now",
+" deprecated.",
 "",
-" `Oversampling` doubles the size of the virtual canvas. It is scaled down",
-" again for drawing to the screen. This gives smoother graphics but requires",
-" more memory and computing time. It requires `double buffer`.",
+" `GDI+ backend` draws to the screen using the GDI+ Windows API. It supports",
+" full antialiasing, oversampling, transparency and custom dash patterns.",
+" This is the currently preferred variant.",
 "",
-" `Antialiasing` selects smoothing of lines and edges. Note that this slows",
-" down drawing.",
+" `Direct2D backend` uses Direct2D & DirectWrite APIs to draw. It uses graphic",
+" card acceleration and is hence typically much faster.  Printing, saving and",
+" copying to clipboard fall back to GDI+.",
+" This will become the default backend but is currently still considered",
+" experimental.", 
+"",
+" `Oversampling` draws diagonal lines at fractional pixel positions to avoid",
+" \"wobbling\" effects.  Vertical or horizontal lines are still snapped",
+" to integer pixel positions to avoid blurry lines.",
+"",
+" `Antialiasing` enables smoothing of lines and edges. Note that this slows",
+" down drawing.  `Antialiasing of polygons` is enabled by default but might",
+" slow down drawing with the GDI+ backend.",
 "",
 " `Fast rotation` switches antialiasing temporarily off while rotating the",
 " graph with the mouse. This speeds up drawing considerably at the expense",
@@ -1210,20 +1438,25 @@ START_HELP(windows)
 "       [WGNUPLOT]",
 "       TextOrigin=0 0",
 "       TextSize=640 150",
-"       TextFont=Terminal,9",
+"       TextFont=Consolas,9",
 "       TextWrap=1",
 "       TextLines=400",
+"       TextMaximized=0",
 "       SysColors=0",
 "       GraphOrigin=0 150",
 "       GraphSize=640 330",
-"       GraphFont=Arial,10",
+"       GraphFont=Tahoma,10",
 "       GraphColor=1",
 "       GraphToTop=1",
-"       GraphDoublebuffer=1",
-"       GraphOversampling=0",
+"       GraphGDI+=1",
+"       GraphD2D=0",
+"       GraphGDI+Oversampling=1",
 "       GraphAntialiasing=1",
+"       GraphPolygonAA=1",
 "       GraphFastRotation=1",
 "       GraphBackground=255 255 255",
+"       DockVerticalTextFrac=350",
+"       DockHorizontalTextFrac=400",
 #ifdef WIN_CUSTOM_PENS
 "       Border=0 0 0 0 0",
 "       Axis=192 192 192 2 2",
@@ -1239,7 +1472,7 @@ START_HELP(windows)
 " These settings apply to the wgnuplot text-window only."
 "",
 " The `TextOrigin` and `TextSize` entries specify the location and size of the",
-" text window.",
+" text window. If `TextMaximized` is non-zero, the window will be maximized.",
 "",
 " The `TextFont` entry specifies the text window font and size.",
 "",
@@ -1250,6 +1483,12 @@ START_HELP(windows)
 " from within wgnuplot.",
 "",
 " See `text-menu`.",
+"",
+"^ <h3>Docked graph options</h3>",
+"",
+" `DockVerticalTextFrac` and `DockHorizontalTextFrac` set the fraction of the",
+" window reserved for the text window in permille of the vertical or horizontal",
+" layout.",
 "",
 "^ <h3>Graph window options</h3>",
 "",

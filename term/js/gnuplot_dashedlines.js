@@ -1,5 +1,5 @@
 /*
- * $Id: gnuplot_dashedlines.js,v 1.3 2012/05/03 20:35:22 sfeam Exp $
+ * $Id: gnuplot_dashedlines.js,v 1.2 2010/11/26 23:39:16 sfeam Exp $
  */
 /*
  * Ethan Merritt November 2010

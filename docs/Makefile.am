@@ -45,13 +45,13 @@
 gih_DATA = gnuplot.gih
 gihdir = @GIHDIR@
 
-noinst_PROGRAMS = checkdoc doc2ipf doc2tex doc2gih doc2rnh doc2hlp \
-                  doc2rtf doc2ms alldoc2gih doc2wxhtml
+noinst_PROGRAMS = checkdoc doc2ipf doc2tex doc2gih doc2rnh doc2hlp	\
+                  doc2rtf doc2ms alldoc2gih
 
 AM_CPPFLAGS = -I$(top_srcdir)/src -I$(top_srcdir)/term
 
 T = $(top_srcdir)/term/
-CORETERM = $(T)ai.trm $(T)aquaterm.trm $(T)be.trm \
+CORETERM = $(T)ai.trm $(T)aquaterm.trm $(T)be.trm $(T)caca.trm \
 $(T)cairo.trm $(T)canvas.trm $(T)cgm.trm $(T)context.trm \
 $(T)corel.trm $(T)debug.trm $(T)djsvga.trm $(T)dumb.trm $(T)dxf.trm \
 $(T)dxy.trm $(T)eepic.trm $(T)emf.trm $(T)emxvga.trm $(T)epson.trm \
@@ -59,9 +59,9 @@ $(T)estimate.trm $(T)excl.trm $(T)fig.trm $(T)gd.trm $(T)ggi.trm \
 $(T)gpic.trm $(T)grass.trm $(T)hp2648.trm $(T)hp26.trm $(T)hp500c.trm \
 $(T)hpgl.trm $(T)hpljii.trm $(T)hppj.trm $(T)imagen.trm $(T)kyo.trm \
 $(T)latex.trm $(T)linux.trm $(T)lua.trm $(T)metafont.trm \
-$(T)metapost.trm $(T)mif.trm $(T)next.trm $(T)openstep.trm $(T)pbm.trm \
+$(T)metapost.trm $(T)mif.trm $(T)pbm.trm \
 $(T)pdf.trm $(T)pm.trm $(T)post.trm $(T)pslatex.trm \
-$(T)pstricks.trm $(T)qms.trm $(T)qt.trm $(T)regis.trm $(T)sun.trm \
+$(T)pstricks.trm $(T)qms.trm $(T)qt.trm $(T)regis.trm \
 $(T)svg.trm $(T)t410x.trm $(T)tek.trm $(T)texdraw.trm $(T)tgif.trm \
 $(T)tkcanvas.trm $(T)tpic.trm $(T)vgagl.trm \
 $(T)vws.trm $(T)win.trm $(T)wxt.trm $(T)x11.trm $(T)xlib.trm 
@@ -76,9 +76,10 @@ TERM_H = $(top_srcdir)/src/term.h
 DOCHEADERS = doc2x.h xref.h
 
 EXTRA_DIST = Makefile.in doc2texi.el figure_missing.pdf gnuplot.doc \
-gpcard.tex makefile.dst titlepag.ipf titlepag.ms titlepag.tex	\
+titlepag.ipf titlepag.ms titlepag.tex	\
 toc_entr.sty psdoc faq-ja.tex gnuplot-ja.doc README.ja	\
-term-ja.diff plotstyles.gnu gnuplot.pdf windows
+term-ja.diff plotstyles.gnu plotstyles_cvt.cmd gnuplot.pdf \
+windows/wgnuplot.hhk windows/wgnuplot.hhp windows/wgnuplot.stp windows/doc2html.c 
 
 ELCS = gnuplot-eldoc.elc
 
@@ -86,10 +87,10 @@ MOSTLYCLEANFILES = gnuplot.aux gnuplot.ind gnuplot.log gnuplot.out	\
 gnuplot.toc figures.aux figures.log figures.toc figures.idx		\
 figures.ilg figures.ind figures.out nofigures.aux nofigures.log		\
 nofigures.toc nofigures.idx nofigures.ilg nofigures.ind nofigures.out	\
-gpcard.log pdffigures.tex pdffigures.aux wxhelp/doc2html.o
+pdffigures.tex pdffigures.aux wxhelp/doc2html.o
 
 CLEANFILES = allterm.h gnuplot.dvi figures.tex nofigures.tex		\
-gnuplot.tex gnuplot.idx gnuplot.ilg gnuplot.ps gpcard.dvi gpcard.ps	\
+gnuplot.tex gnuplot.idx gnuplot.ilg gnuplot.ps 	\
 gnuplot.gih gnuplot.hlp gnuplot.info* gnuplot.ipf gnuplot.ms		\
 gnuplot.rnh gnuplot.rtf gnuplot.nroff gnuplot.txt gnuplot-groff.dvi	\
 gnuplot-groff.ps gnuplot.tmp VERSION gnuplot.4tc gnuplot.4ct		\
@@ -103,17 +104,14 @@ DISTFILES = $(DIST_COMMON) $(SOURCES) $(DOCHEADERS) $(EXTRA_DIST)
 BUILT_SOURCES = allterm.h
 
 GNUPLOT_EXE = ../src/gnuplot$(EXEEXT)
-SRC_VERSION_O   = ../src/version.o
 
 $(GNUPLOT_EXE):
 	( cd ../src ; $(MAKE) gnuplot$(EXEEXT) )
-$(SRC_VERSION_O):
-	( cd ../src ; $(MAKE) version.o )
 
 if BUILD_LUA
 LUA_HELP = gnuplot-tikz.help
 $(LUA_HELP): $(top_srcdir)/term/lua/gnuplot-tikz.lua
-	$(AM_V_GEN)lua $< termhelp > $@
+	$(AM_V_GEN) $(LUA) $< termhelp > $@
 else
 LUA_HELP = 
 endif
@@ -243,16 +241,9 @@ gnuplot.dvi: gnuplot.tex $(srcdir)/titlepag.tex $(srcdir)/toc_entr.sty
 	  echo "latex not found - cannot build dvi file" ; \
 	fi
 
-gpcard.dvi: $(srcdir)/gpcard.tex
-	$(AM_V_GEN)if test $(PLAINTEX) != no ; then \
-              TEXINPUTS=.:$(srcdir):$(top_srcdir): tex gpcard ; \
-	else \
-	  echo "plaintex not found - cannot build dvi file" ; \
-	fi
-
 ### Postscript format
 # if pslatex has been installed, add "times" to titlepage.tex
-ps: gnuplot.ps gpcard.ps
+ps: gnuplot.ps
 
 gnuplot.ps: gnuplot.dvi
 	$(AM_V_GEN)if test $(DVIPS) != no ; then \
@@ -260,14 +251,6 @@ gnuplot.ps: gnuplot.dvi
 	else \
 	   echo "dvips not found - cannot build PS file" ; \
 	fi
-
-gpcard.ps: gpcard.dvi
-	$(AM_V_GEN)if test $(DVIPS) != no ; then \
-            $(DVIPS) gpcard.dvi -o gpcard.ps ; \
-	else \
-	   echo "dvips not found - cannot build PS file" ; \
-	fi
-
 
 # this is how to make gnuplot.hlp
 hlp: gnuplot.hlp
@@ -305,17 +288,7 @@ wxhelp/wgnuplot.hhc wxhelp/wgnuplot.hhk wxhelp/*.html windows/*.png
 wxhelp/wgnuplot.html: doc2wxhtml$(EXEEXT) $(srcdir)/gnuplot.doc 
 	$(AM_V_GEN) ./doc2wxhtml$(EXEEXT) $(srcdir)/gnuplot.doc wxhelp/
 
-doc2wxhtml$(EXEEXT): wxhelp/doc2html.o termdoc.o xref.o $(SRC_VERSION_O)
-	$(AM_V_CCLD) $(LINK) $^
-
-wxhelp/doc2html.o: $(srcdir)/windows/doc2html.c $(BUILT_SOURCES)
-	$(AM_V_AT)[ -d wxhelp ] || mkdir wxhelp
-	$(AM_V_CC) $(COMPILE) -c -o $@ -I.. -DALL_TERM_DOC -DWXHELP $<
-
-
-# HBB FIXME 2015-06-28: this is how the above really should be handled, but it causes
-# problems with the way automake handles its 'subdir-objects' option.
-#doc2wxhtml_SOURCES = windows/doc2html.c termdoc.c xref.c allterm.h ../src/version.c
+#doc2wxhtml_SOURCES = windows/doc2html.c termdoc.c xref.c allterm.h
 #doc2wxhtml_CPPFLAGS = -DALL_TERM_DOC -DWXHELP -I../src $(AM_CPPFLAGS)
 
 wxhelp_figures: $(GNUPLOT_EXE) $(srcdir)/plotstyles.gnu
@@ -343,6 +316,10 @@ ${ELCS}: gnuplot-eldoc.el
 	else \
 	   echo "No emacs found - cannot create gnuplot-eldoc.elc file" ; \
 	fi
+
+# Rules processing texinfo could be provided by automake
+# automatically, using a line like info_TEXINFOS = gnuplot.texi.  But
+# that only appears to work with a non-generated texi file for input.
 
 gnuplot.info: gnuplot.texi
 	$(AM_V_GEN) $(MAKEINFO) -I$(srcdir) $< --no-split --output=$@

@@ -1,5 +1,5 @@
 /*
- * $Id: mousecmn.h,v 1.17.2.1 2014/12/31 04:32:09 sfeam Exp $
+ * $Id: mousecmn.h,v 1.19 2016/09/28 14:46:18 markisch Exp $
  */
 
 /* GNUPLOT - mousecnm.h */
@@ -69,16 +69,20 @@ enum {
     GE_replot,          /* used only by ggi.trm */
     GE_reset,           /* reset to a well-defined state
 			   (e.g.  after an X11 error occured) */
-    GE_fontprops	/* par1 = hchar par2 = vchar */
+    GE_fontprops,       /* par1 = hchar par2 = vchar */
 #if defined(PIPE_IPC)
-    , GE_pending        /* signal gp_exec_event() to send pending events */
+    GE_pending,         /* signal gp_exec_event() to send pending events */
 #endif
+    GE_raise            /* raise console window */
 };
 
 
 /* the status of the shift, ctrl and alt keys
-*/
-enum { Mod_Shift = (1), Mod_Ctrl = (1 << 1), Mod_Alt = (1 << 2) };
+ * Mod_Opt is used by the "bind" mechanism to indicate that the
+ * Ctrl or Alt key is allowed but not required
+ */
+enum { Mod_Shift = (1), Mod_Ctrl = (1 << 1), Mod_Alt = (1 << 2),
+       Mod_Opt = (1 << 3) };
 
 /* the below depends on the ascii character set lying in the
  * range from 0 to 255 (below 1000) */

@@ -1,5 +1,5 @@
 /*
- * $Id: graph3d.h,v 1.47 2014/04/22 20:49:28 sfeam Exp $
+ * $Id: graph3d.h,v 1.53 2016/11/05 21:21:07 sfeam Exp $
  */
 
 /* GNUPLOT - graph3d.h */
@@ -44,11 +44,6 @@
 
 #include "gadgets.h"
 #include "term_api.h"
-
-/* Function macros to map from user 3D space into normalized -1..1 */
-#define map_x3d(x) ((x-X_AXIS.min)*xscale3d + xcenter3d -1.0)
-#define map_y3d(y) ((y-Y_AXIS.min)*yscale3d + ycenter3d -1.0)
-#define map_z3d(z) ((z-floor_z)*zscale3d + zcenter3d -1.0)
 
 /* Type definitions */
 
@@ -97,17 +92,18 @@ typedef struct surface_points {
     enum PLOT_TYPE plot_type;	/* DATA2D? DATA3D? FUNC2D FUNC3D? NODATA? */
     enum PLOT_STYLE plot_style;	/* style set by "with" or by default */
     char *title;		/* plot title, a.k.a. key entry */
-    int title_position;		/* -1 for beginning; +1 for end */
+    t_position *title_position;	/* title at {beginning|end|<xpos>,<ypos>} */
     TBOOLEAN title_no_enhanced;	/* don't typeset title in enhanced mode */
     TBOOLEAN title_is_filename;	/* not used in 3D */
     TBOOLEAN title_is_suppressed;/* TRUE if 'notitle' was specified */
     TBOOLEAN noautoscale;	/* ignore data from this plot during autoscaling */
     struct lp_style_type lp_properties;
     struct arrow_style_type arrow_properties;
-    struct fill_style_type fill_properties;	/* FIXME: ignored in 3D */
+    struct fill_style_type fill_properties;
     struct text_label *labels;	/* Only used if plot_style == LABELPOINTS */
-    struct t_image image_properties;	/* only used if plot_style is IMAGE or RGB_IMAGE */
-    struct udvt_entry *sample_var;	/* Only used if plot has private sampling range */
+    struct t_image image_properties;	/* only used if plot_style is IMAGE, RGBIMAGE or RGBA_IMAGE */
+    struct udvt_entry *sample_var;	/* used by '+' if plot has private sampling range */
+    struct udvt_entry *sample_var2;	/* used by '++' if plot has private sampling range */
 
     /* 2D and 3D plot structure fields overlay only to this point */
 
@@ -131,7 +127,7 @@ typedef struct surface_points {
 /* Variables of graph3d.c needed by other modules: */
 
 extern int xmiddle, ymiddle, xscaler, yscaler;
-extern double floor_z;
+extern double floor_z, floor_z1;
 extern double ceiling_z, base_z; /* made exportable for PM3D */
 extern transform_matrix trans_mat;
 extern double xscale3d, yscale3d, zscale3d;
@@ -156,6 +152,7 @@ extern float surface_scale;
 extern float surface_zscale;
 extern float surface_lscale;
 extern float mapview_scale;
+extern float azimuth;
 extern int splot_map;
 
 typedef struct { 

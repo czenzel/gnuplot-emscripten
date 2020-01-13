@@ -1,5 +1,5 @@
 #ifndef lint
-static char *RCSid() { return RCSid("$Id: doc2html.c,v 1.6.4.2 2015/10/31 23:38:32 sfeam Exp $"); }
+static char *RCSid() { return RCSid("$Id: doc2html.c,v 1.9 2016/01/16 12:33:43 broeker Exp $"); }
 #endif
 
 /* GNUPLOT - doc2html.c */
@@ -168,7 +168,7 @@ convert(FILE *a, FILE *b, FILE *c, FILE *d)
     static char line[MAX_LINE_LEN+1];
 
     header(b, "gnuplot help");
-    fprintf(b, "<h1 align=\"center\">gnuplot %s patchlevel %s</h1>\n", gnuplot_version, gnuplot_patchlevel);
+    fprintf(b, "<h1 align=\"center\">gnuplot %s patchlevel %s</h1>\n", VERSION_MAJOR, PATCHLEVEL);
 
     header(c, "gnuplot help contents");
     fprintf(c, "<ul>\n");
@@ -206,6 +206,7 @@ process_line(char *line, FILE *b, FILE *c, FILE *d)
     static int level = 1;
     static TBOOLEAN startpage = TRUE;
     static TBOOLEAN tabl = FALSE;
+    static TBOOLEAN intable = FALSE;
     static TBOOLEAN skiptable = FALSE;
     static TBOOLEAN forcetable = FALSE;
     static TBOOLEAN para = FALSE;
@@ -355,8 +356,9 @@ process_line(char *line, FILE *b, FILE *c, FILE *d)
             }
 	    break;
     case '@':{			/* start/end table */
-            skiptable = !skiptable;
-            if (!skiptable) forcetable = FALSE;
+	    skiptable = !skiptable;
+	    if (!skiptable) forcetable = FALSE;
+	    intable = !intable; /* just for latex list support */
 	    break;
 	}
     case '^':{			/* html link escape */
@@ -387,7 +389,27 @@ process_line(char *line, FILE *b, FILE *c, FILE *d)
             if (para) fprintf(b, "</p><p align=\"justify\">\n");
             break;
     case '#':{			/* latex table entry */
-	    break;		/* ignore */
+	    if (!intable) {  /* HACK: we just handle itemized lists */
+		/* Itemized list outside of table */
+		if (line[1] == 's')
+		    (void) fputs("<ul>\n", b);
+		else if (line[1] == 'e')
+		    (void) fputs("</ul>\n", b);
+		else if (line[1] == 'b') {
+		    /* Bullet */
+		    fprintf(b, "<li>%s\n", line2+2);
+		}
+		else if (line[1] == '#') {
+		    /* Continuation of bulleted line */
+		    fputs(line2+2, b);
+		}
+		else {
+		    if (strchr(line, '\n'))
+			*(strchr(line, '\n')) = '\0';
+		    fprintf(b, "<li><pre>%s</pre>\n", line + 1);
+		}
+	    }
+	    break;
 	}
     case '%':{			/* troff table entry */
 	    break;		/* ignore */

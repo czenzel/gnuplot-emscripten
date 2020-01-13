@@ -1,5 +1,5 @@
 /*
- * $Id: gp_cairo.h,v 1.22 2014/04/18 04:12:46 sfeam Exp $
+ * $Id: gp_cairo.h,v 1.21 2013/05/19 23:46:34 sfeam Exp $
  */
 
 /* GNUPLOT - gp_cairo.h */
@@ -222,7 +222,7 @@ void gp_cairo_set_linestyle(plot_struct *plot, int linestyle);
 void gp_cairo_set_linetype(plot_struct *plot, int linetype);
 void gp_cairo_set_pointsize(plot_struct *plot, double pointsize);
 void gp_cairo_set_justify(plot_struct *plot, JUSTIFY mode);
-void gp_cairo_set_font(plot_struct *plot, const char *name, int fontsize);
+void gp_cairo_set_font(plot_struct *plot, const char *name, float fontsize);
 void gp_cairo_set_linewidth(plot_struct *plot, double linewidth);
 void gp_cairo_set_textangle(plot_struct *plot, double angle);
 

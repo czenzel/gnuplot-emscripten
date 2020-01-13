@@ -1,5 +1,5 @@
 /*
- * $Id: graphics.h,v 1.61.2.4 2016/05/11 18:38:51 sfeam Exp $
+ * $Id: graphics.h,v 1.70.2.2 2017/09/06 18:37:56 sfeam Exp $
  */
 
 /* GNUPLOT - graphics.h */
@@ -51,7 +51,7 @@ typedef struct curve_points {
     enum PLOT_TYPE plot_type;	/* DATA2D? DATA3D? FUNC2D FUNC3D? NODATA? */
     enum PLOT_STYLE plot_style;	/* style set by "with" or by default */
     char *title;		/* plot title, a.k.a. key entry */
-    int title_position;		/* -1 for beginning; +1 for end */
+    t_position *title_position;	/* title at {beginning|end|<xpos>,<ypos>} */
     TBOOLEAN title_no_enhanced;	/* don't typeset title in enhanced mode */
     TBOOLEAN title_is_filename;	/* TRUE if title was auto-generated from filename */
     TBOOLEAN title_is_suppressed;/* TRUE if 'notitle' was specified */
@@ -61,7 +61,8 @@ typedef struct curve_points {
     struct fill_style_type fill_properties;
     struct text_label *labels;	/* Only used if plot_style == LABELPOINTS */
     struct t_image image_properties;	/* only used if plot_style is IMAGE or RGB_IMAGE */
-    struct udvt_entry *sample_var;	/* Only used if plot has private sampling range */
+    struct udvt_entry *sample_var;	/* used by '+' if plot has private sampling range */
+    struct udvt_entry *sample_var2;	/* used by '++'if plot has private sampling range */
 
     /* 2D and 3D plot structure fields overlay only to this point */
     filledcurves_opts filledcurves_options;
@@ -78,6 +79,7 @@ typedef struct curve_points {
     int x_axis;			/* FIRST_X_AXIS or SECOND_X_AXIS */
     int y_axis;			/* FIRST_Y_AXIS or SECOND_Y_AXIS */
     int z_axis;			/* same as either x_axis or y_axis, for 5-column plot types */
+    int current_plotno;		/* Only used by "pn" option of linespoints */
     int n_par_axes;		/* Only used for parallel axis plots */
     double **z_n;		/* Only used for parallel axis plots */
     double *varcolor;		/* Only used if plot has variable color */
@@ -92,6 +94,10 @@ extern t_position loff, roff, toff, boff;
 /* 'set bar' status */
 extern double bar_size;
 extern int bar_layer;
+extern struct lp_style_type bar_lp;
+
+/* 'set rgbmax {0|255}' */
+extern double rgbmax;
 
 /* function prototypes */
 
@@ -103,7 +109,13 @@ void map_position_r __PROTO((struct position* pos, double* x, double* y,
 void init_histogram __PROTO((struct histogram_style *hist, text_label *title));
 void free_histlist __PROTO((struct histogram_style *hist));
 
-void plot_image_or_update_axes __PROTO((void *plot, TBOOLEAN update_axes));
+typedef enum en_procimg_action {
+    IMG_PLOT,
+    IMG_UPDATE_AXES,
+    IMG_UPDATE_CORNERS
+} t_procimg_action;
+
+void process_image __PROTO((void *plot, t_procimg_action action));
 TBOOLEAN check_for_variable_color __PROTO((struct curve_points *plot, double *colorvalue));
 
 
@@ -116,5 +128,6 @@ void do_polygon __PROTO((int dimensions, t_polygon *p, int style, t_clip_object 
 #endif
 
 int filter_boxplot __PROTO((struct curve_points *));
+void attach_title_to_plot __PROTO((struct curve_points *this_plot, legend_key *key));
 
 #endif /* GNUPLOT_GRAPHICS_H */

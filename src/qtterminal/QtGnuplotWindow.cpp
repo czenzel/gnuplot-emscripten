@@ -41,6 +41,11 @@
  * under either the GPL or the gnuplot license.
 ]*/
 
+#ifdef _WIN32
+# define WIN32_LEAN_AND_MEAN
+# include <windows.h>
+#endif
+
 #include "QtGnuplotWindow.h"
 #include "QtGnuplotWidget.h"
 #include "QtGnuplotEvent.h"
@@ -57,6 +62,7 @@ QtGnuplotWindow::QtGnuplotWindow(int id, QtGnuplotEventHandler* eventHandler, QW
 	m_ctrl = false;
 	m_eventHandler = eventHandler;
 	m_id = id;
+	m_pid = 0;
 	setWindowIcon(QIcon(":/images/gnuplot"));
 
 //	Setting this attribute causes an error to be reported to the user if a plot
@@ -107,6 +113,11 @@ QtGnuplotWindow::QtGnuplotWindow(int id, QtGnuplotEventHandler* eventHandler, QW
 	exportMenu->addAction(exportPngAction);
 	exportAction->setMenu(exportMenu);
 	m_toolBar->addAction(exportAction);
+	QWidget* exportWidget = m_toolBar->widgetForAction(exportAction);
+	QToolButton* exportButton = qobject_cast<QToolButton*>(exportWidget);
+	if (exportButton) {
+		connect(exportAction, SIGNAL(triggered(bool)), exportButton, SLOT(showMenu()));
+	}
 	createAction(tr("Replot")       , 'e', ":/images/replot");
 	createAction(tr("Show grid")    , 'g', ":/images/grid");
 	createAction(tr("Previous zoom"), 'p', ":/images/zoomPrevious");
@@ -147,7 +158,10 @@ void QtGnuplotWindow::on_keyAction()
 void QtGnuplotWindow::print()
 {
 	QPrinter printer;
-	if (QPrintDialog(&printer).exec() == QDialog::Accepted)
+	printer.setDocName(tr("gnuplot-qt graph"));
+	QPrintDialog dialog(&printer, this);
+	dialog.setOption(QAbstractPrintDialog::PrintPageRange, false);
+	if (dialog.exec() == QDialog::Accepted)
 		m_widget->print(printer);
 }
 
@@ -274,7 +288,14 @@ void QtGnuplotWindow::processEvent(QtGnuplotEventType type, QDataStream& in)
 		setWindowTitle(title);
 	}
 	else if (type == GERaise)
+	{
+#ifdef _WIN32
+		SetForegroundWindow((HWND) winId());
+		if (isMinimized())
+			showNormal();
+#endif
 		raise();
+	}
 	else if (type == GESetCtrl)
 		in >> m_ctrl;
 	else if (type == GESetPosition)
@@ -283,6 +304,8 @@ void QtGnuplotWindow::processEvent(QtGnuplotEventType type, QDataStream& in)
 		in >> pos;
 		move(pos);
 	}
+	else if (type == GEPID)
+		in >> m_pid;
 	else
 		m_widget->processEvent(type, in);
 }
@@ -291,6 +314,16 @@ void QtGnuplotWindow::keyPressEvent(QKeyEvent* event)
 {
 	if ((event->key() == 'Q') && ( !m_ctrl || (QApplication::keyboardModifiers() & Qt::ControlModifier) ))
 		close();
+
+#ifdef _WIN32
+#if !defined(DISABLE_SPACE_RAISES_CONSOLE)
+	if ((event->key() == Qt::Key_Space) && ( !m_ctrl || (QApplication::keyboardModifiers() & Qt::ControlModifier) ))
+	{
+		AllowSetForegroundWindow(m_pid);
+		m_eventHandler->postTermEvent(GE_raise, 0, 0, 0, 0, m_widget);
+	}
+#endif
+#endif
 
 	QMainWindow::keyPressEvent(event);
 }

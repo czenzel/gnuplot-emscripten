@@ -1,7 +1,3 @@
-/* Hello, Emacs, this is -*-C-*-
- * $Id: svg.trm,v 1.170.2.2 2016/08/04 23:01:12 sfeam Exp $
- */
-
 /*------------------------------------------------------------------------------------------------------------------------------------
 	GNUPLOT - svg.trm
 
@@ -19,6 +15,10 @@
 
 		Hans-Bernhard Br"oker
 		broeker@physik.rwth-aachen.de
+
+	DomTerm support
+
+		Per Bothner  <per@bothner.com>
 
 ------------------------------------------------------------------------------------------------------------------------------------*/
 
@@ -53,6 +53,13 @@
  *
  * Revised font sizing Oct 2012
  *   specify font-size without "pt" units.
+ *
+ * Inline image data in Base64 encoding
+ *   Daniel Sebald May 2016
+ *
+ * Transition to SVG 2.0
+ *   remove DTD
+ *   remove option "fontfile" and references to SVG fonts 
  */
 
 /*
@@ -129,6 +136,8 @@ static char *SVG_name = NULL;
 static char *SVG_scriptdir = NULL;
 static TBOOLEAN SVG_mouseable = FALSE;
 static TBOOLEAN SVG_standalone = FALSE;
+static TBOOLEAN SVG_domterm = FALSE;
+static TBOOLEAN SVG_emit_doctype = TRUE;
 
 static TBOOLEAN SVG_groupFilledIsOpen = FALSE; /* open pm3d group flag*/
 static TBOOLEAN SVG_inTextBox = FALSE;
@@ -197,10 +206,7 @@ static void SVG_StyleFillColor __PROTO((void));
 static void SVG_local_reset __PROTO((void));
 static void SVG_DefineFillPattern __PROTO((int fillpat));
 static void SVG_MoveForced __PROTO((unsigned int x, unsigned int y));
-
-/* Points to source of requested embedded font */
-static char *SVG_embedded_font = NULL;
-static void SVG_load_fontfile __PROTO((char *fontfile));
+static void SVG_write_preamble __PROTO ((void));
 
 /* Stuff for enhanced text mode */
 static int ENHsvg_string_state = 0;
@@ -236,7 +242,7 @@ SVG_Pen_RealID (int inPenCode)
 	inPenCode %= 13;	/* normalize pen code*/
     inPenCode += 3;
     if (inPenCode < 0)
-	inPenCode = 0;		/* LT_NODRAW or LT_BACKGROUND should use background color */
+	inPenCode = 0;		/* LT_BACKGROUND should use background color */
 
     return (inPenCode);
 }
@@ -298,7 +304,9 @@ SVG_PathOpen ()
 	fputs ("\t<path ", gpoutfile);
 
 	/* Line color */
-	if (SVG_color_mode == TC_RGB)
+	if (SVG_LineType == LT_NODRAW)
+	    fprintf(gpoutfile, "stroke='none' ");
+	else if (SVG_color_mode == TC_RGB)
 	    fprintf(gpoutfile, "stroke='rgb(%3d, %3d, %3d)' ",
 		    SVG_red, SVG_green, SVG_blue);
 	else if (SVG_color_mode == TC_LT)
@@ -505,6 +513,17 @@ SVG_options ()
     if (!almost_equals(c_token-1, "termopt$ion"))
 	SVG_local_reset();
 
+    if (strcmp(term->name, "domterm") == 0) {
+        SVG_emit_doctype = FALSE;
+        SVG_domterm = TRUE;
+    } else {
+        SVG_emit_doctype = TRUE;
+        SVG_domterm = FALSE;
+    }
+
+    /* Minimal initialization in case we error out of options parsing */
+    SVG_set_font("");
+
     while (!END_OF_COMMAND) {
 	if (almost_equals(c_token, "s$ize")) {
 	    double value;
@@ -622,24 +641,11 @@ SVG_options ()
 	    continue;
 	}
 
-	if (almost_equals(c_token, "fs$ize")) {
+	if (equals(c_token, "fontscale")) {
 	    c_token++;
-
-	    if (END_OF_COMMAND)
-		int_error(c_token,"fsize: expecting font size");
-	    SVG_fontSizeDef = real_expression();
-	    continue;
-	}
-
-	if (almost_equals(c_token, "fontfile")) {
-	    char *fontfile_name;
-	    c_token++;
-
-	    fontfile_name = try_to_get_string();
-	    if (!fontfile_name)
-		int_error(c_token, "Font filename expected");
-	    gp_expand_tilde(&fontfile_name);
-	    SVG_embedded_font = fontfile_name;
+	    SVG_fontscale = real_expression();
+	    if (SVG_fontscale <= 0)
+		SVG_fontscale = 1.0;
 	    continue;
 	}
 
@@ -696,7 +702,7 @@ SVG_options ()
     SVG_set_font("");
 
     /* Save options back into options string in normalized format */
-    sprintf(term_options, "size %d,%d%s %s fname '%s'  fsize %g ",
+    sprintf(term_options, "size %d,%d%s %s font '%s,%g' ",
 	    (int)(SVG_xSize/SVG_SCALE), (int)(SVG_ySize/SVG_SCALE),
 	SVG_fixed_size ? " fixed": " dynamic",
 	term->put_text == ENHsvg_put_text ? "enhanced" : "",
@@ -715,11 +721,6 @@ SVG_options ()
     if (SVG_name) {
 	sprintf(term_options + strlen(term_options),
 	    "name \"%s\" ", SVG_name);
-    }
-
-    if (SVG_embedded_font) {
-	sprintf(term_options + strlen(term_options),
-	    "fontfile \"%s\" ", SVG_embedded_font);
     }
 
     sprintf(term_options + strlen(term_options),
@@ -749,9 +750,6 @@ SVG_local_reset()
     free(SVG_fontNameDef);
     SVG_fontNameDef = gp_strdup("Arial");
     SVG_fontSizeDef  = 12;
-    if (SVG_embedded_font)
-	free(SVG_embedded_font);
-    SVG_embedded_font = NULL;
     SVG_mouseable = FALSE;
     SVG_standalone = FALSE;
     free(SVG_name);
@@ -771,10 +769,6 @@ SVG_local_reset()
 TERM_PUBLIC void
 SVG_init ()
 {
-    int len;
-    double stroke_width;
-    char *svg_encoding = "";
-
     /* setup pens*/
     SVG_pens[0].width = SVG_LineWidth;
     strcpy (SVG_pens[0].color, "white"); /* should really be background */
@@ -830,8 +824,15 @@ SVG_init ()
 
     term->h_tic = term->v_char / 2;
     term->v_tic = term->v_char / 2;
+}
 
 /* write file header*/
+static void
+SVG_write_preamble ()
+{
+    int len;
+    double stroke_width;
+    char *svg_encoding = "";
 
     switch (encoding) {
 	case S_ENC_ISO8859_1:	svg_encoding = "encoding=\"iso-8859-1\" "; break;
@@ -853,11 +854,13 @@ SVG_init ()
 				break;
     }
 
-    fprintf (gpoutfile,
-	     "<?xml version=\"1.0\" %s standalone=\"no\"?>\n"
-	     "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\"\n"
-	     " \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n"
-	     "<svg ", svg_encoding);
+    if (SVG_domterm)
+      fprintf(gpoutfile, "\033]72;");
+    if (SVG_emit_doctype)
+        fprintf (gpoutfile,
+                 "<?xml version=\"1.0\" %s standalone=\"no\"?>\n",
+                 svg_encoding);
+    fprintf(gpoutfile, "<svg ");
 
     if (SVG_mouseable)
 	fprintf (gpoutfile, " onload=\"if (typeof(gnuplot_svg)!='undefined') gnuplot_svg.Init(evt)\" ");
@@ -889,31 +892,21 @@ SVG_init ()
  *	  Figure out the full URL to use for xlink:href="gnuplot_svg.js"
  */
     if (SVG_scriptdir == NULL) {
-	char *svg_default_jsdir = "";
 #ifdef GNUPLOT_JS_DIR
-# if defined(_Windows)
-	/* retrieve path relative to the gnuplot executable,
-	 * whose path is in szModuleName (winmain.c) */
-	/* EAM FIXME: memory leak */
-	svg_default_jsdir = gp_alloc(strlen((char*) szPackageDir)
-			+ strlen(GNUPLOT_JS_DIR) + 2, "jsdir");
-	strcpy(svg_default_jsdir, (char*) szPackageDir);
-	len = strlen(svg_default_jsdir);
-	if (*svg_default_jsdir && svg_default_jsdir[len-1] != '\\' && svg_default_jsdir[len-1] != '/')
-	    strcat(svg_default_jsdir, "\\");
-	/* GNUPLOT_JS_DIR is _relative_ path */
-	strcat(svg_default_jsdir, GNUPLOT_JS_DIR);
-# else /* !_Windows */
+# if defined(_WIN32)
+	SVG_scriptdir = RelativePathToGnuplot(GNUPLOT_JS_DIR);
+# else /* !_WIN32 */
 	/* use hardcoded _absolute_ path */
-	svg_default_jsdir = GNUPLOT_JS_DIR;
+	SVG_scriptdir = gp_strdup(GNUPLOT_JS_DIR);
 # endif
+#else
+	SVG_scriptdir = gp_strdup("");
 #endif /* GNUPLOT_JS_DIR */
-	SVG_scriptdir = gp_strdup(svg_default_jsdir);
     }
 
 #if !defined(VMS)
     len = strlen(SVG_scriptdir);
-# if defined(_Windows)
+# if defined(_WIN32)
     if (*SVG_scriptdir && SVG_scriptdir[len-1] != '\\' && SVG_scriptdir[len-1] != '/') {
 	SVG_scriptdir = gp_realloc(SVG_scriptdir, len+2, "jsdir");
 	if (SVG_scriptdir[len-1] == '\\') /* use backslash if used in jsdir, otherwise slash */
@@ -951,7 +944,7 @@ SVG_init ()
 		int_warn(NO_CARET, "Failed to insert javascript file %s\n", fullname);
  	    else {
 		fprintf(gpoutfile,
-		    "<script language=\"javaScript\" TYPE=\"text/javascript\" > <![CDATA[\n");
+		    "<script type=\"text/javascript\" > <![CDATA[\n");
 		while (fgets(buf, sizeof(buf), svg_js_fd))
 		    fputs(buf, gpoutfile);
 		fprintf(gpoutfile,"]]>\n</script>\n");
@@ -967,7 +960,7 @@ SVG_init ()
 	fprintf(gpoutfile,"<rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\"",
 		0, 0, (int)(term->xmax/SVG_SCALE), (int)(term->ymax/SVG_SCALE));
 	fprintf(gpoutfile," fill=\"#%06x\" stroke=\"black\" stroke-width=\"1\"\n",
-		SVG_background>0 ? SVG_background : 0xffffff);
+		SVG_background >= 0 ? SVG_background : 0xffffff);
 	fprintf(gpoutfile,"onclick=\"gnuplot_svg.toggleCoordBox(evt)\"  onmousemove=\"gnuplot_svg.moveCoordBox(evt)\"/>\n");
 	fprintf(gpoutfile,"\n<!-- Also track mouse when it is on a plot element -->\n");
 	fprintf(gpoutfile,"<g id=\"gnuplot_canvas\" onclick=\"gnuplot_svg.toggleCoordBox(evt)\" onmousemove=\"gnuplot_svg.moveCoordBox(evt)\">\n\n");
@@ -985,8 +978,6 @@ SVG_init ()
     /* Start prologue section of output file, and load fonts if requested */
 
     fprintf(gpoutfile,"<defs>\n");
-    if (SVG_embedded_font)
-	SVG_load_fontfile(SVG_embedded_font);
 
     /* definitions of point symbols */
     /* FIXME: SVG scales linewidth along with the marker itself, and
@@ -999,7 +990,7 @@ SVG_init ()
     fprintf (gpoutfile,
 	     "\n"
 	     /* dot: */
-	     "\t<circle id='gpDot' r='0.5' stroke-width='0.5'/>\n"
+	     "\t<circle id='gpDot' r='0.5' stroke-width='0.5' stroke='currentColor'/>\n"
 	     /*  0 plus */
 	     "\t<path id='gpPt0' stroke-width='%.3f' stroke='currentColor' d='M-1,0 h2 M0,-1 v2'/>\n"
 	     /*  1 X */
@@ -1066,8 +1057,10 @@ SVG_init ()
 TERM_PUBLIC void
 SVG_graphics ()
 {
-    /* EAM 5-May-2004 We must force a new group with fill:none in order for  */
-    /* multiple plots per page to work. Otherwise new plots are black-filled */
+    SVG_write_preamble();
+
+    /* We must force a new group with fill:none in order for multiple */
+    /* plots per page to work. Otherwise new plots are black-filled   */
     SVG_GroupOpen();
 
     SVG_fillPattern = -1;
@@ -1131,9 +1124,13 @@ SVG_text ()
 
 	fprintf(gpoutfile, "gnuplot_svg.polar_mode = %s;\n",
 		polar ? "true" : "false");
-	if (polar)
+	if (polar) {
 	    fprintf(gpoutfile, "gnuplot_svg.plot_axis_rmin = %g;\n",
 		(R_AXIS.autoscale & AUTOSCALE_MIN) ? 0.0 : R_AXIS.set_min);
+	    fprintf(gpoutfile, "gnuplot_svg.plot_axis_rmax = %g;\n", R_AXIS.set_max);
+	    fprintf(gpoutfile, "gnuplot_svg.polar_theta0 = %d;\n", (int)theta_origin);
+	    fprintf(gpoutfile, "gnuplot_svg.polar_sense = %d;\n", (int)theta_direction);
+	}
 
 	if ((axis_array[SECOND_X_AXIS].ticmode & TICS_MASK) != NO_TICS) {
 	    MOUSE_PARAM("GPVAL_X2_MIN", "plot_axis_x2min");
@@ -1197,7 +1194,7 @@ SVG_text ()
 	fprintf(gpoutfile,"  visibility=\"hidden\"> </text>\n");
     }
 
-    /* And a box and a text element to hold mouseover hypertext */
+    /* Add a box and a text element to hold mouseover hypertext */
     if (SVG_mouseable) {
 	fprintf(gpoutfile,"\n  <rect id=\"hypertextbox\" class=\"hypertextbox\" pointer-events=\"none\"\n");
 	fprintf(gpoutfile,"  fill=\"white\" stroke=\"black\" opacity=\"0.8\"\n");
@@ -1207,11 +1204,26 @@ SVG_text ()
 	fprintf(gpoutfile,"  visibility=\"hidden\"> </text>\n");
     }
 
+    /* Add a placeholder for an image linked to mouseover hypertext */
+    if (SVG_mouseable) {
+	fprintf(gpoutfile,"\n  <image id=\"hyperimage\" class=\"hyperimage\" pointer-events=\"none\"\n");
+	fprintf(gpoutfile,"  fill=\"white\" stroke=\"black\" opacity=\"0.8\"\n");
+	fprintf(gpoutfile,"  height=\"200\" width=\"300\" visibility=\"hidden\" />\n");
+    }
+
     /* If there were any grid lines in this plot, add a button to toggle them */
     if (SVG_mouseable && SVG_hasgrid) {
-	fprintf(gpoutfile,"\n  <image x='10' y='%d' width='16' height='16' xlink:href='grid.png'\n",
-	(int)(term->ymax/SVG_SCALE)-26);
-	fprintf(gpoutfile,"    onclick='gnuplot_svg.toggleGrid();'/>\n");
+	fprintf(gpoutfile,"\n  <image x='10' y='%d' width='16' height='16' ",
+		(int)(term->ymax/SVG_SCALE)-26);
+	fprintf(gpoutfile, "\n    xlink:href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAABmJLR0QA/wD/AP+gvaeTAAAAM0lEQVQokWP8//8/AymACc5iZGQkyEDRQCwgyUn///9nhGtgZISy8TBGnTSCnMRIavIGAGPTWfVV7DcfAAAAAElFTkSuQmCC'");
+	fprintf(gpoutfile, "\n    onclick='gnuplot_svg.toggleGrid();'/>\n");
+    }
+
+    fputs("</svg>\n\n", gpoutfile);
+
+    if (SVG_domterm) {
+        fprintf(gpoutfile, "\007");
+        fflush(gpoutfile);
     }
 }
 
@@ -1221,7 +1233,6 @@ SVG_text ()
 TERM_PUBLIC void
 SVG_reset ()
 {
-    fputs("</svg>\n\n", gpoutfile);
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------
@@ -1619,23 +1630,27 @@ SVG_set_color(t_colorspec *colorspec)
     SVG_alpha = 0.0;
 
     if (colorspec->type == TC_LT) {
-	SVG_linecolor = SVG_pens[SVG_Pen_RealID (colorspec->lt)].color;
+        if (SVG_linecolor != SVG_pens[SVG_Pen_RealID (colorspec->lt)].color) {
+	    SVG_linecolor = SVG_pens[SVG_Pen_RealID (colorspec->lt)].color;
+	    SVG_PathClose();
+	}
 	SVG_color_mode = TC_LT;
 	return;
-    } else if (colorspec->type == TC_FRAC)
+    } else if (colorspec->type == TC_FRAC) {
 	rgb255maxcolors_from_gray( colorspec->value, &rgb255 );
-    else if (colorspec->type == TC_RGB) {
+    } else if (colorspec->type == TC_RGB) {
 	rgb255.r = colorspec->lt >> 16 & 0xff;
 	rgb255.g = colorspec->lt >> 8 & 0xff;
 	rgb255.b = colorspec->lt & 0xff;
 	SVG_alpha = (double)(colorspec->lt >> 24 & 0xff) / 255.;
-    } else
+    } else {
 	return;
+    }
 
     SVG_color_mode = TC_RGB;
 
     if (rgb255.r != SVG_red || rgb255.g != SVG_green || rgb255.b != SVG_blue) {
-	/* pm3d color has changed. We've to start a new path
+	/* pm3d color has changed. We must start a new path
 	 * with a different line color. This is necessary when
 	 * using "linetype palette". */
 	SVG_PathClose();
@@ -1731,13 +1746,12 @@ SVG_layer(t_termlayer syncpoint)
 		    panel[0] = 'a' + multiplot_current_panel();
 
 		fprintf(gpoutfile, "\t<g id=\"%s_plot_%d%s\" ", name,SVG_plotno,panel);
-		if (SVG_hypertext_text && *SVG_hypertext_text) {
+		if (SVG_hypertext_text && *SVG_hypertext_text)
 		    fprintf(gpoutfile, "><title>%s</title>\n", SVG_hypertext_text);
-		    free(SVG_hypertext_text);
-		    SVG_hypertext_text = NULL;
-		} else {
+		else
 		    fprintf(gpoutfile, "><title>%s_plot_%d%s</title>\n", name,SVG_plotno,panel);
-		}
+		free(SVG_hypertext_text);
+		SVG_hypertext_text = NULL;
 		SVG_LineType = LT_UNDEFINED; /* Force a new group on next stroke */
 		break;
 
@@ -1796,22 +1810,40 @@ SVG_layer(t_termlayer syncpoint)
 TERM_PUBLIC void
 SVG_image (unsigned m, unsigned n, coordval *image, gpiPoint *corner, t_imagecolor color_mode) 
 {
-    char *image_file;
-    char *base_name = SVG_name ? SVG_name : "gp";
-   
-    /* Write the image to a png file */
-    image_file = gp_alloc(strlen(base_name)+16, "SVG_image");
-    sprintf(image_file, "%s_image_%02d.png", base_name, ++SVG_imageno);
-    write_png_image (m, n, image, color_mode, image_file);
+    SVG_PathClose();
 
-    /* Map it onto the terminals coordinate system. */
+    /* Map image onto the terminal's coordinate system. */
     fprintf(gpoutfile, "<image x='%.*f' y='%.*f' width='%.*f' height='%.*f' preserveAspectRatio='none' ",
-	PREC, X(corner[0].x), PREC, Y(corner[0].y), 
-	PREC, X(corner[1].x) - X(corner[0].x), PREC, Y(corner[1].y) - Y(corner[0].y));
+	    PREC, X(corner[0].x), PREC, Y(corner[0].y), 
+	    PREC, X(corner[1].x) - X(corner[0].x), PREC, Y(corner[1].y) - Y(corner[0].y));
 
-    fprintf(gpoutfile, "xlink:href='%s_image_%02d.png'/>;\n",
-	base_name, SVG_imageno);
+    /* Feb 2017 - always embed images */
+    if (TRUE || SVG_standalone || SVG_domterm) {
+	/* Embed the PNG file in SVG by converting to base64 */
+	fprintf(gpoutfile, "xlink:href='data:image/png;base64,");
+	if (write_png_base64_image(m, n, image, color_mode, gpoutfile))
+	    os_error(NO_CARET, "SVG_image: could not write to gnuplot output file.");
+	fprintf(gpoutfile, "'/>\n");
 
+    } else {
+        /* Write the image to a png file */
+	char *image_file;
+        char *base_name = SVG_name ? SVG_name : "gp";
+	int wpiresult;
+   
+        image_file = gp_alloc(strlen(base_name)+16, "SVG_image");
+        sprintf(image_file, "%s_image_%02d.png", base_name, ++SVG_imageno);
+        wpiresult = write_png_image(m, n, image, color_mode, image_file);
+
+	/* Reference the png image file */
+	fprintf(gpoutfile, "xlink:href='%s_image_%02d.png'/>\n",
+		base_name, SVG_imageno);
+	
+	free(image_file);
+
+	if (wpiresult != 0)
+	    os_error(NO_CARET, "SVG_image: could not write to PNG reference file.");
+    }
 }
 #endif
 
@@ -1870,17 +1902,6 @@ ENHsvg_OPEN(
 
 	/* Start a new textspan fragment */
 	fputs("<tspan", gpoutfile);
-#if (0)
-	if (strcmp(SVG_fontNameCur, fontname)) {
-	    free(SVG_fontNameCur);
-	    SVG_fontNameCur = gp_strdup(fontname);
-	    fprintf(gpoutfile, " font-family=\"%s\" ", SVG_fontNameCur);
-	}
-	if (SVG_fontWeightCur && strcmp(SVG_fontWeightCur,"normal"))
-	    fprintf(gpoutfile, " font-weight=\"%s\" ", SVG_fontWeightCur);
-	if (SVG_fontStyleCur && strcmp(SVG_fontStyleCur,"normal"))
-	    fprintf(gpoutfile, " font-style=\"%s\" ", SVG_fontStyleCur);
-#else
 	if (!fontname)
 	    fprintf(stderr,"ENHsvg_OPEN: null fontname\n");
 	else {
@@ -1900,7 +1921,6 @@ ENHsvg_OPEN(
 	    if (strstr(fontname,":Italic"))
 		fprintf(gpoutfile, " font-style=\"italic\" ");
 	}
-#endif
 	if (SVG_fontSizeCur != fontsize) {
 	    SVG_fontSizeCur = fontsize;
 	    fprintf(gpoutfile, " font-size=\"%.1f\"", SVG_fontSizeCur * SVG_fontscale);
@@ -2031,70 +2051,10 @@ ENHsvg_writec(int c)
 		*enhanced_cur_text++ = c;
 		break;
     }
-}
 
-static void
-SVG_load_fontfile(char *fontfile)
-{
-    if (fontfile) {
-	unsigned int linesread = 0;
-	FILE *ffont = NULL;
-	char line[256];
-	char *fontname = NULL;
-#if defined(PIPES)
-	TBOOLEAN ispipe = FALSE;
-#endif
-
-#if defined(PIPES)
-	if ( *fontfile == '<' ) {
-	    restrict_popen();
-	    ispipe = TRUE;
-	    ffont = popen(fontfile + 1, "r" );
-	    if ( !ffont )
-		int_error(NO_CARET, "Could not execute pipe '%s'",
-			  fontfile + 1 );
-	} else
-#endif
-	{
-	    ffont = fopen(fontfile, "r");
-	    if (!ffont)
-		int_error(NO_CARET, "Font file '%s' not found", fontfile);
-	}
-
-	/* read the file */
-	while (fgets(line,255,ffont)) {
-	    /* Echo fontname to terminal */
-	    if ((fontname = strstr(line,"font-family"))) {
-		fprintf(stderr, "Font file '%s' contains the font '%s'\n",
-				fontfile, fontname);
-	    }
-
-	    /* Copy contents into output file */
-	    fputs(line,gpoutfile);
-
-	    ++linesread;
-	}
-#if defined(PIPES)
-	if ( ispipe ) {
-	    int exitcode;
-	    if ( (exitcode = pclose(ffont)) != 0 )
-		int_error(NO_CARET, "Command '%s' generated error exitcode %d",
-			  fontfile + 1, exitcode);
-	} else
-#endif
-	    fclose(ffont);
-
-	if (linesread == 0) {
-#if defined(PIPES)
-	    if ( ispipe )
-		int_error(NO_CARET,
-		    "Command '%s' generates empty output", fontfile + 1);
-	    else
-#endif
-		int_error(NO_CARET, "Font file '%s' is empty", fontfile);
-	}
-
-    }
+    /* Split output stream into chunks rather than overflow the buffer */
+    if ((enhanced_cur_text - enhanced_text) >= sizeof(enhanced_text)-1)
+	ENHsvg_FLUSH();
 }
 
 TERM_PUBLIC void
@@ -2118,7 +2078,7 @@ SVG_hypertext( int type, const char *text )
 
     free(SVG_hypertext_text);
     if (text) {
-	char *buffer = gp_alloc(5*strlen(text),"escape");
+	char *buffer = gp_alloc(2+5*strlen(text),"escape");
 	enhanced_cur_text = buffer;
 	do { ENHsvg_writec(*text); }
 	    while (*text++);
@@ -2166,7 +2126,7 @@ TERM_TABLE_START (svg_driver)
     SVG_options, SVG_init, SVG_reset, SVG_text, null_scale, SVG_graphics,
     SVG_move, SVG_vector, SVG_linetype, SVG_put_text, SVG_text_angle,
     SVG_justify_text, SVG_point, do_arrow, SVG_set_font, do_pointsize,
-    TERM_CAN_MULTIPLOT | TERM_CAN_DASH | TERM_ALPHA_CHANNEL|TERM_LINEWIDTH,
+    TERM_CAN_DASH | TERM_ALPHA_CHANNEL|TERM_LINEWIDTH,
     0 /* suspend */, 0 /* resume */ , SVG_fillbox, SVG_linewidth
 #ifdef USE_MOUSE
    , 0, 0, 0, 0, 0 /* no mouse support for svg */
@@ -2195,6 +2155,42 @@ TERM_TABLE_END (svg_driver)
 #undef LAST_TERM
 #define LAST_TERM svg_driver
 
+TERM_TABLE_START (domterm_driver)
+    "domterm", "DomTerm terminal emulator with embedded SVG",
+    0 /* xmax */ , 0 /* ymax */ , 0 /* vchar */ , 0 /* hchar */ ,
+    0 /* vtic */ , 0 /* htic */ ,
+    SVG_options, SVG_init, SVG_reset, SVG_text, null_scale, SVG_graphics,
+    SVG_move, SVG_vector, SVG_linetype, SVG_put_text, SVG_text_angle,
+    SVG_justify_text, SVG_point, do_arrow, SVG_set_font, do_pointsize,
+    TERM_CAN_DASH | TERM_ALPHA_CHANNEL|TERM_LINEWIDTH,
+    0 /* suspend */, 0 /* resume */ , SVG_fillbox, SVG_linewidth
+#ifdef USE_MOUSE
+   , 0, 0, 0, 0, 0 /* no mouse support for svg */
+#endif
+   , SVG_make_palette,
+   SVG_previous_palette,
+   SVG_set_color,
+   SVG_filled_polygon
+#ifdef WRITE_PNG_IMAGE
+    , SVG_image
+#else
+    , NULL	/* image */
+#endif
+   , ENHsvg_OPEN, ENHsvg_FLUSH, ENHsvg_writec
+   , SVG_layer	/* layer */
+   , SVG_path 	/* path */
+   , SVG_SCALE	/* pixel oversampling scale */
+   , SVG_hypertext	/* hypertext support */
+#ifdef EAM_BOXED_TEXT
+   , SVG_boxed_text	/* boxed text labels */
+#endif
+   , NULL		/* modify_plots */
+   , SVG_dashtype	/* Version 5 dashtype support */
+TERM_TABLE_END (domterm_driver)
+
+#undef LAST_TERM
+#define LAST_TERM domterm_driver
+
 #endif /* TERM_TABLE */
 #endif /* TERM_PROTO_ONLY */
 
@@ -2211,12 +2207,10 @@ START_HELP(svg)
 "",
 " Syntax:",
 "       set terminal svg {size <x>,<y> {|fixed|dynamic}}",
-"                        {{no}enhanced}",
-"                        {fname \"<font>\"} {fsize <fontsize>}",
 "                        {mouse} {standalone | jsdir <dirname>}",
 "                        {name <plotname>}",
-"                        {font \"<fontname>{,<fontsize>}\"}",
-"                        {fontfile <filename>}",
+"                        {font \"<fontname>{,<fontsize>}\"} {{no}enhanced}",
+"                        {fontscale <multiplier>}",
 "                        {rounded|butt|square} {solid|dashed} {linewidth <lw>}",
 "                        {background <rgb_color>}",
 "",
@@ -2231,10 +2225,8 @@ START_HELP(svg)
 " <fontsize> is the font size (in points, default 12). SVG viewing",
 " programs may substitute other fonts when the file is displayed.",
 "",
-" The svg terminal supports an enhanced text mode, which allows font",
-" and other formatting commands to be embedded in labels and other text",
-" strings. The enhanced text mode syntax is shared with other gnuplot",
-" terminal types. See `enhanced` for more details.",
+" The enhanced text mode syntax is shared with other gnuplot terminal types.",
+" See `enhanced` for more details.",
 "",
 " The `mouse` option tells gnuplot to add support for mouse tracking and for",
 " toggling individual plots on/off by clicking on the corresponding key entry.",
@@ -2243,22 +2235,29 @@ START_HELP(svg)
 " You can change this by using the `jsdir` option to specify either a",
 " different local directory or a general URL. The latter is usually",
 " appropriate if you are embedding the svg into a web page.",
-" Alternatively, the `standalone` option embeds the mousing code in the",
-" svg document itself rather than linking to an external resource.",
+" Alternatively, the `standalone` option embeds the mousing code in the svg",
+" document itself rather than linking to an external resource.",
 "",
 " When an SVG file will be used in conjunction with external files,",
-" e.g. if it embeds a PNG image or is referenced by javascript code",
-" in a web page or embedding document, then a unique name is required",
-" to avoid potential conflicting references to other SVG plots.",
-" Use the `name` option to ensure uniqueness.",
-"",
-" SVG allows you to embed fonts directly into an SVG document, or to",
-" provide a hypertext link to the desired font. The `fontfile` option",
-" specifies a local file which is copied into the <defs> section of the",
-" resulting SVG output file.  This file may either itself contain a font,",
-" or may contain the records necessary to create a hypertext reference to",
-" the desired font. Gnuplot will look for the requested file using the",
-" directory list in the GNUPLOT_FONTPATH environmental variable.",
-" NB: You must embed an svg font, not a TrueType or PostScript font."
+" e.g. if it is referenced by javascript code in a web page or parent document,",
+" then a unique name is required to avoid potential conflicting references",
+" to other SVG plots.  Use the `name` option to ensure uniqueness.",
+""
 END_HELP(svg)
-#endif
+
+START_HELP(domterm)
+"1 domterm",
+"?set terminal domterm",
+"?terminal domterm",
+"?set term domterm",
+"?term domterm",
+"?domterm",
+" The `domterm` terminal device runs on the DomTerm terminal emulator",
+" including the domterm and qtdomterm programs.",
+" It supports SVG graphics embedded directly in the terminal output.",
+" See http://domterm.org .",
+"",
+" Please read the help for the `svg` terminal.",
+""
+END_HELP(domterm)
+#endif /* TERM_HELP */

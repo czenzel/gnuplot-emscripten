@@ -1,7 +1,3 @@
-/*
- * $Id: gp_cairo.c,v 1.87.2.9 2016/07/08 20:48:34 sfeam Exp $
- */
-
 /* GNUPLOT - gp_cairo.c */
 
 /*[
@@ -122,6 +118,17 @@ static int avg_vchar = 150;
 static void gp_cairo_fill(plot_struct *plot, int fillstyle, int fillpar);
 static void gp_cairo_fill_pattern(plot_struct *plot, int fillstyle, int fillpar);
 
+#ifdef EAM_BOXED_TEXT
+/* Boxed text support */
+static int bounding_box[4];
+static double bounding_xmargin = 1.0;
+static double bounding_ymargin = 1.0;
+static double box_rotation = 0.0;
+static double box_origin_x;
+static double box_origin_y;
+static TBOOLEAN in_textbox = FALSE;
+#endif
+
 /* array of colors
  * FIXME could be shared with all gnuplot terminals */
 static rgb_color gp_cairo_colorlist[12] = {
@@ -196,14 +203,11 @@ void gp_cairo_initialize_plot(plot_struct *plot)
 	plot->polygon_path_last = NULL;
 
 	plot->interrupt = FALSE;
-}
 
 #ifdef EAM_BOXED_TEXT
-/* Boxed text support */
-static int bounding_box[4];
-static double bounding_xmargin = 1.0;
-static double bounding_ymargin = 1.0;
+	in_textbox = FALSE;
 #endif
+}
 
 /* set the transformation matrix of the context, and other details */
 /* NOTE : depends on the setting of xscale and yscale */
@@ -301,12 +305,12 @@ void gp_cairo_set_justify(plot_struct *plot, JUSTIFY mode)
 }
 
 
-void gp_cairo_set_font(plot_struct *plot, const char *name, int fontsize)
+void gp_cairo_set_font(plot_struct *plot, const char *name, float fontsize)
 {
     char *c;
     char *fname;
 
-	FPRINTF((stderr,"set_font \"%s\" %d\n", name,fontsize));
+	FPRINTF((stderr,"set_font \"%s\" %f\n", name,fontsize));
 
 	/* Split out Bold and Italic attributes from font name */
 	fname = strdup(name);
@@ -346,11 +350,12 @@ void gp_cairo_set_linewidth(plot_struct *plot, double linewidth)
 	gp_cairo_end_polygon(plot);
 
 	if (!strcmp(term->name,"pdfcairo"))
-	    linewidth *= 2;
+		linewidth *= 2;
+
 	if (linewidth < 0.20)	/* Admittedly arbitrary */
 	    linewidth = 0.20;
-
 	plot->linewidth = linewidth;
+
 }
 
 
@@ -604,7 +609,8 @@ void gp_cairo_stroke(plot_struct *plot)
 	cairo_save(plot->cr);
 
 	if (plot->linetype == LT_NODRAW) {
-		cairo_set_operator(plot->cr, CAIRO_OPERATOR_XOR);
+		cairo_set_operator(plot->cr, CAIRO_OPERATOR_DEST);
+		lw = 0.0;
 
 	} else if (lt == LT_AXIS || plot->linestyle == GP_CAIRO_DOTS) {
 		/* Grid lines (lt 0) */
@@ -791,7 +797,7 @@ gp_cairo_create_layout(cairo_t *cr)
 #endif
 
     layout = pango_layout_new(context);
-    g_object_unref(context);
+    g_clear_object (&context);
 
     return layout;
 }
@@ -807,8 +813,9 @@ void gp_cairo_draw_text(plot_struct *plot, int x1, int y1, const char* string,
 		    int *width, int *height)
 {
 	double x,y;
-	double arg = plot->text_angle * M_PI/180;
+	double arg;
 	double vert_just, delta, deltax, deltay;
+	double box_x, box_y;
 	PangoRectangle ink_rect;
 	PangoRectangle logical_rect;
 	PangoLayout *layout;
@@ -878,11 +885,9 @@ void gp_cairo_draw_text(plot_struct *plot, int x1, int y1, const char* string,
 	vert_just = 0.5 * (float)(plot->fontsize * plot->oversampling_scale);
 	vert_just = baseline_offset - vert_just;
 
-	x = (double) x1;
-	y = (double) y1;
-
-	x -= vert_just * sin(arg);
-	y -= vert_just * cos(arg);
+	arg = plot->text_angle * M_PI/180;
+	x = (double)x1 - vert_just * sin(arg);
+	y = (double)y1 - vert_just * cos(arg);
 
 	delta = ((double)logical_rect.width/2) / PANGO_SCALE;
 
@@ -907,10 +912,11 @@ void gp_cairo_draw_text(plot_struct *plot, int x1, int y1, const char* string,
 #endif /* helper point */
 
 	cairo_save (plot->cr);
+	cairo_translate(plot->cr, x, y);
+	cairo_rotate(plot->cr, -arg);
+
 	cairo_set_source_rgba(plot->cr, plot->color.r, plot->color.g, plot->color.b,
 				1. - plot->color.alpha);
-	cairo_move_to (plot->cr, x-0.5, y-0.5);
-	cairo_rotate(plot->cr, -arg);
 
 	/* Inform Pango to re-layout the text with the new transformation */
 	pango_cairo_update_layout (plot->cr, layout);
@@ -920,35 +926,45 @@ void gp_cairo_draw_text(plot_struct *plot, int x1, int y1, const char* string,
 	cairo_new_path(plot->cr);
 
 #ifdef EAM_BOXED_TEXT
-	cairo_set_line_width(plot->cr, plot->linewidth*plot->oversampling_scale);
-	cairo_rotate(plot->cr, arg);
-	cairo_translate(plot->cr, x, y);
-	cairo_rotate(plot->cr, -arg);
+	if (in_textbox) {
+		box_rotation = -arg;
+		box_origin_x = x1;
+		box_origin_y = y1;
+		box_y = box_origin_y - vert_just;
+		switch (plot->justify_mode) {
+		case LEFT:
+			box_x = box_origin_x;
+			break;
+		default:
+		case CENTRE:
+			box_x = box_origin_x - delta;
+			break;
+		case RIGHT:
+			box_x = box_origin_x - 2*delta;
+			break;
+		}
 
-	{
-	PangoRectangle ink, logical;
-	pango_layout_get_pixel_extents (layout, &ink, &logical);
+		/* Update bounding box for boxed label text */
+		pango_layout_get_pixel_extents (layout, &ink_rect, &logical_rect);
 
-	/* Auto-initialization */
-	if (bounding_box[0] < 0 && bounding_box[1] < 0) {
-	    bounding_box[0] = bounding_box[2] = x;
-	    bounding_box[1] = bounding_box[3] = y;
-	}
-
-	/* Would it look better to use logical bounds rather than ink? */
-	if (bounding_box[0] > x + ink.x)
-	    bounding_box[0] = x + ink.x;
-	if (bounding_box[2] < x + ink.x + ink.width)
-	    bounding_box[2] = x + ink.x + ink.width;
-	if (bounding_box[1] > y + ink.y)
-	    bounding_box[1] = y + ink.y;
-	if (bounding_box[3] < y + ink.y + ink.height)
-	    bounding_box[3] = y + ink.y + ink.height;
+		/* Auto-initialization */
+		if (bounding_box[0] < 0 && bounding_box[1] < 0) {
+		    bounding_box[0] = bounding_box[2] = box_x;
+		    bounding_box[1] = bounding_box[3] = box_y;
+		}
+		if (bounding_box[0] > box_x + ink_rect.x)
+		    bounding_box[0] = box_x + ink_rect.x;
+		if (bounding_box[2] < box_x + ink_rect.x + ink_rect.width)
+		    bounding_box[2] = box_x + ink_rect.x + ink_rect.width;
+		if (bounding_box[1] > box_y + ink_rect.y)
+		    bounding_box[1] = box_y + ink_rect.y;
+		if (bounding_box[3] < box_y + ink_rect.y + ink_rect.height)
+		    bounding_box[3] = box_y + ink_rect.y + ink_rect.height;
 	}
 #endif
 
 	/* free the layout object */
-	g_object_unref (layout);
+	g_clear_object (&layout);
 	cairo_restore (plot->cr);
 }
 
@@ -1317,8 +1333,11 @@ void gp_cairo_enhanced_flush(plot_struct *plot)
 		pango_layout_set_text (save_layout, gp_cairo_save_utf8, -1);
 		pango_layout_set_attributes (save_layout, gp_cairo_enhanced_save_AttrList);
 		pango_layout_get_extents(save_layout, NULL, &save_logical_rect);
-		g_object_unref (save_layout);
+		g_clear_object (&save_layout);
+
 		pango_attr_list_unref( gp_cairo_enhanced_save_AttrList );
+		gp_cairo_enhanced_save_AttrList = NULL;
+
 		/* invert the size, so we will go back to the saved state */
 		save_logical_rect.width = -save_logical_rect.width;
 		/* EAM FIXME:  Zero height necessary but I don't understand why */
@@ -1345,7 +1364,7 @@ void gp_cairo_enhanced_flush(plot_struct *plot)
 		else
 			pango_layout_set_attributes (underprinted_layout, gp_cairo_enhanced_underprinted_AttrList);
 		pango_layout_get_extents(underprinted_layout, NULL, &underprinted_logical_rect);
-		g_object_unref (underprinted_layout);
+		g_clear_object (&underprinted_layout);
 
 		/* compute the size of the text to overprint*/
 
@@ -1362,7 +1381,7 @@ void gp_cairo_enhanced_flush(plot_struct *plot)
 		pango_layout_set_font_description (current_layout, current_desc);
 		pango_font_description_free (current_desc);
 		pango_layout_get_extents(current_layout, &current_ink_rect, &current_logical_rect);
-		g_object_unref (current_layout);
+		g_clear_object (&current_layout);
 
 		/* calculate the distance to remove to center the overprinted text */
 		underprinted_logical_rect.width = -(underprinted_logical_rect.width + current_logical_rect.width)/2;
@@ -1391,7 +1410,7 @@ void gp_cairo_enhanced_flush(plot_struct *plot)
 		pango_layout_set_text (current_layout, gp_cairo_utf8, -1);
 		pango_layout_set_attributes (current_layout, gp_cairo_enhanced_AttrList);
 		pango_layout_get_extents(current_layout, &current_ink_rect, &current_logical_rect);
-		g_object_unref (current_layout);
+		g_clear_object (&current_layout);
 
 		/* we first compute the size of the text */
 		/* Create a PangoLayout, set the font and text */
@@ -1407,7 +1426,7 @@ void gp_cairo_enhanced_flush(plot_struct *plot)
 		pango_font_description_free (hide_desc);
 
 		pango_layout_get_extents(hide_layout, &hide_ink_rect, &hide_logical_rect);
-		g_object_unref (hide_layout);
+		g_clear_object (&hide_layout);
 
 		/* rect.y must be reworked to take previous text into account, which may be smaller */
 		/* hide_logical_rect.y is always initialized at zero, but should be : */
@@ -1436,7 +1455,7 @@ void gp_cairo_enhanced_flush(plot_struct *plot)
 		pango_layout_set_font_description (zerowidth_layout, zerowidth_desc);
 		pango_font_description_free (zerowidth_desc);
 		pango_layout_get_extents(zerowidth_layout, NULL, &zerowidth_logical_rect);
-		g_object_unref (zerowidth_layout);
+		g_clear_object (&zerowidth_layout);
 
 		/* invert the size, so we will go back to the start of the string */
 		zerowidth_logical_rect.width = -zerowidth_logical_rect.width;
@@ -1563,6 +1582,7 @@ void gp_cairo_enhanced_finish(plot_struct *plot, int x, int y)
 	PangoRectangle ink_rect, logical_rect;
 	PangoLayout *layout;
 	double vert_just, arg, enh_x, enh_y, delta, deltax, deltay;
+	double box_x, box_y;
 	int baseline_offset;
 
 	/* Create a PangoLayout, set the font and text */
@@ -1602,8 +1622,7 @@ void gp_cairo_enhanced_finish(plot_struct *plot, int x, int y)
 	}
 
 	cairo_save(plot->cr);
-	cairo_move_to (plot->cr, enh_x, enh_y);
-	/* angle in radians */
+	cairo_translate(plot->cr, enh_x, enh_y);
 	cairo_rotate(plot->cr, -arg);
 
 	cairo_set_source_rgba(plot->cr, plot->color.r, plot->color.g, plot->color.b,
@@ -1614,31 +1633,49 @@ void gp_cairo_enhanced_finish(plot_struct *plot, int x, int y)
 	/* pango_cairo_show_layout does not clear the path (here a starting point)
 	 * Do it by ourselves, or we can get spurious lines on future calls. */
 	cairo_new_path(plot->cr);
-
-#ifdef EAM_BOXED_TEXT
-	/* Update bounding box for boxed label text */
-	pango_layout_get_pixel_extents (layout, &ink_rect, &logical_rect);
-
-	/* Auto-initialization */
-	if (bounding_box[0] < 0 && bounding_box[1] < 0) {
-	    bounding_box[0] = bounding_box[2] = x;
-	    bounding_box[1] = bounding_box[3] = y;
-	}
-
-	/* Would it look better to use logical bounds rather than ink_rect? */
-	if (bounding_box[0] > enh_x + ink_rect.x)
-	    bounding_box[0] = enh_x + ink_rect.x;
-	if (bounding_box[2] < enh_x + ink_rect.x + ink_rect.width)
-	    bounding_box[2] = enh_x + ink_rect.x + ink_rect.width;
-	if (bounding_box[1] > enh_y + ink_rect.y)
-	    bounding_box[1] = enh_y + ink_rect.y;
-	if (bounding_box[3] < enh_y + ink_rect.y + ink_rect.height)
-	    bounding_box[3] = enh_y + ink_rect.y + ink_rect.height;
-#endif
 	
+#ifdef EAM_BOXED_TEXT
+	if (in_textbox) {
+		box_rotation = -arg;
+		box_origin_x = x;
+		box_origin_y = y;
+		box_y = box_origin_y - vert_just;
+		switch (plot->justify_mode) {
+		case LEFT:
+			box_x = box_origin_x;
+			break;
+		default:
+		case CENTRE:
+			box_x = box_origin_x - delta;
+			break;
+		case RIGHT:
+			box_x = box_origin_x - 2*delta;
+			break;
+		}
+
+		/* Update bounding box for boxed label text */
+		pango_layout_get_pixel_extents (layout, &ink_rect, &logical_rect);
+
+		/* Auto-initialization */
+		if (bounding_box[0] < 0 && bounding_box[1] < 0) {
+		    bounding_box[0] = bounding_box[2] = box_x;
+		    bounding_box[1] = bounding_box[3] = box_y;
+		}
+		if (bounding_box[0] > box_x + ink_rect.x)
+		    bounding_box[0] = box_x + ink_rect.x;
+		if (bounding_box[2] < box_x + ink_rect.x + ink_rect.width)
+		    bounding_box[2] = box_x + ink_rect.x + ink_rect.width;
+		if (bounding_box[1] > box_y + ink_rect.y)
+		    bounding_box[1] = box_y + ink_rect.y;
+		if (bounding_box[3] < box_y + ink_rect.y + ink_rect.height)
+		    bounding_box[3] = box_y + ink_rect.y + ink_rect.height;
+	}
+#endif
+
 	/* free the layout object */
 	pango_attr_list_unref( gp_cairo_enhanced_AttrList );
-	g_object_unref (layout);
+	gp_cairo_enhanced_AttrList = NULL;
+	g_clear_object (&layout);
 	cairo_restore(plot->cr);
 	strncpy(gp_cairo_utf8, "", sizeof(gp_cairo_utf8));
 	free(gp_cairo_enhanced_string);
@@ -1708,6 +1745,7 @@ void gp_cairo_boxed_text(plot_struct *plot, int x, int y, int option)
 		/* Initialize bounding box for this text string */
 		bounding_box[0] = bounding_box[2] = x;
 		bounding_box[1] = bounding_box[3] = y;
+		in_textbox = TRUE;
 		break;
 
 	case TEXTBOX_OUTLINE:
@@ -1720,6 +1758,17 @@ void gp_cairo_boxed_text(plot_struct *plot, int x, int y, int option)
 		gp_cairo_end_polygon(plot);
 
 		cairo_save(plot->cr);
+
+		/* In progress: textbox rotation
+		 * 1) translate to text origin
+		 * 2) substract translation from bounding box
+		 * 3) rotate about new origin
+		 * 4) stroke/fill
+		 */
+		cairo_translate(plot->cr, box_origin_x, box_origin_y);
+		cairo_rotate(plot->cr, box_rotation);
+		cairo_translate(plot->cr, -box_origin_x, -box_origin_y);
+
 		dx = 0.25 * bounding_xmargin * (float)(plot->fontsize * plot->oversampling_scale);
 		dy = 0.25 * bounding_ymargin * (float)(plot->fontsize * plot->oversampling_scale);
 		if (option == TEXTBOX_GREY)
@@ -1731,19 +1780,22 @@ void gp_cairo_boxed_text(plot_struct *plot, int x, int y, int option)
 		gp_cairo_vector(plot, bounding_box[0]+dx, bounding_box[1]-dy); 
 		cairo_close_path(plot->cr);
 		if (option == TEXTBOX_BACKGROUNDFILL) {
-		    rgb_color *background = &gp_cairo_colorlist[0];
-		    cairo_set_source_rgb(plot->cr, background->r, background->g, background->b);
+		    cairo_set_source_rgba(plot->cr, plot->color.r, plot->color.g,
+					  plot->color.b, 1. - plot->color.alpha);
 		    cairo_fill(plot->cr);
 		} else if (option == TEXTBOX_GREY) {
 		    cairo_set_source_rgba(plot->cr, 0.75, 0.75, 0.75, 0.50);
 		    cairo_fill(plot->cr);
-		} else {
-		    cairo_set_line_width(plot->cr, 0.5*plot->oversampling_scale);
-		    cairo_set_source_rgb(plot->cr,
-			plot->color.r, plot->color.g, plot->color.b);
+		} else {  /* option == TEXTBOX_OUTLINE */
+		    cairo_set_line_width(plot->cr,
+					 0.5*plot->linewidth*plot->oversampling_scale);
+		    cairo_set_source_rgba(plot->cr, plot->color.r, plot->color.g,
+					  plot->color.b, 1. - plot->color.alpha);
 		    cairo_stroke(plot->cr);
 		}
+
 		cairo_restore(plot->cr);
+		in_textbox = FALSE;
 		break;
 
 	case TEXTBOX_MARGINS: /* Change the margin between text and box */
@@ -1884,7 +1936,7 @@ void gp_cairo_set_termvar(plot_struct *plot, unsigned int *v_char,
 	pango_layout_set_font_description (layout, desc);
 	pango_font_description_free (desc);
 	pango_layout_get_extents(layout, &ink_rect, &logical_rect);
-	g_object_unref (layout);
+	g_clear_object (&layout);
 
 	/* we don't use gnuplot_x() and gnuplot_y() in the following
 	 * as the scale should have just been updated to 1.

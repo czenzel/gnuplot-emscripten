@@ -1,5 +1,5 @@
 #ifndef lint
-static char *RCSid() { return RCSid("$Id: fit.c,v 1.145.2.16 2016/05/13 17:28:17 markisch Exp $"); }
+static char *RCSid() { return RCSid("$Id: fit.c,v 1.170.2.1 2017/07/22 22:07:58 sfeam Exp $"); }
 #endif
 
 /*  NOTICE: Change of Copyright Status
@@ -652,12 +652,15 @@ call_gnuplot(const double *par, double *data)
 	/* initialize extra dummy variables from the corresponding
 	 actual variables, if any. */
 	for (j = 0; j < MAX_NUM_VAR; j++) {
+	    double dummy_value;
 	    struct udvt_entry *udv = fit_dummy_udvs[j];
 	    if (!udv)
 		int_error(NO_CARET, "Internal error: lost a dummy parameter!");
-	    Gcomplex(&func.dummy_values[j],
-	             udv->udv_undef ? 0 : real(&(udv->udv_value)),
-	             0.0);
+	    if (udv->udv_value.type == CMPLX || udv->udv_value.type == INTGR)
+		dummy_value = real(&(udv->udv_value));
+	    else
+		dummy_value = 0.0;
+	    Gcomplex(&func.dummy_values[j], dummy_value, 0.0);
 	}
 	/* set actual dummy variables from file data */
 	for (j = 0; j < num_indep; j++)
@@ -814,7 +817,6 @@ regress_init(void)
 
     /* Reset flag describing fit result status */
     v = add_udv_by_name("FIT_CONVERGED");
-    v->udv_undef = FALSE;
     Ginteger(&v->udv_value, 0);
 
     /* Ctrl-C now serves as Hotkey */
@@ -880,7 +882,6 @@ regress_finalize(int iter, double chisq, double last_chisq, double lambda, doubl
     } else {
 	Dblf2("\nAfter %d iterations the fit converged.\n", iter);
 	v = add_udv_by_name("FIT_CONVERGED");
-	v->udv_undef = FALSE;
 	Ginteger(&v->udv_value, 1);
     }
 
@@ -892,19 +893,14 @@ regress_finalize(int iter, double chisq, double last_chisq, double lambda, doubl
 
     /* Export these to user-accessible variables */
     v = add_udv_by_name("FIT_NDF");
-    v->udv_undef = FALSE;
     Ginteger(&v->udv_value, ndf);
     v = add_udv_by_name("FIT_STDFIT");
-    v->udv_undef = FALSE;
     Gcomplex(&v->udv_value, stdfit, 0);
     v = add_udv_by_name("FIT_WSSR");
-    v->udv_undef = FALSE;
     Gcomplex(&v->udv_value, chisq, 0);
     v = add_udv_by_name("FIT_P");
-    v->udv_undef = FALSE;
     Gcomplex(&v->udv_value, pvalue, 0);
     v = add_udv_by_name("FIT_NITER");
-    v->udv_undef = FALSE;
     Ginteger(&v->udv_value, niter);    
 
     /* Save final parameters. Depending on the backend and
@@ -1436,7 +1432,7 @@ static int
 getivar(const char *varname)
 {
     struct udvt_entry * v = get_udv_by_name((char *)varname);
-    if ((v != NULL) && (!v->udv_undef))
+    if ((v != NULL) && (v->udv_value.type != NOTDEFINED))
 	return real_int(&(v->udv_value));
     else
 	return 0;
@@ -1450,7 +1446,7 @@ static double
 getdvar(const char *varname)
 {
     struct udvt_entry * v = get_udv_by_name((char *)varname);
-    if ((v != NULL) && (!v->udv_undef))
+    if ((v != NULL) && (v->udv_value.type != NOTDEFINED))
 	return real(&(v->udv_value));
     else
 	return 0;
@@ -1466,8 +1462,7 @@ static double
 createdvar(char *varname, double value)
 {
     struct udvt_entry *udv_ptr = add_udv_by_name((char *)varname);
-    if (udv_ptr->udv_undef) { /* new variable */
-	udv_ptr->udv_undef = FALSE;
+    if (udv_ptr->udv_value.type == NOTDEFINED) { /* new variable */
 	Gcomplex(&udv_ptr->udv_value, value, 0.0);
     } else if (udv_ptr->udv_value.type == INTGR) { /* convert to CMPLX */
 	Gcomplex(&udv_ptr->udv_value, (double) udv_ptr->udv_value.v.int_val, 0.0);
@@ -1475,6 +1470,8 @@ createdvar(char *varname, double value)
     return real(&(udv_ptr->udv_value));
 }
 
+
+/* Begin DEPRECATED section */
 
 /* argument: char *fn */
 #define VALID_FILENAME(fn) ((fn) != NULL && (*fn) != '\0')
@@ -1527,12 +1524,7 @@ update(char *pfile, char *npfile)
 	    /* Technically, a prior fit command isn't really required.  But since
 	    all variables in the parameter file would be marked '# FIXED' in that
 	    case, it cannot be directly used in a subsequent fit command. */
-#if 1
-	    Eex2("'update' requires a prior 'fit' since the parameter file %s does not exist yet.", ofilename);
-#else
-	    fprintf(stderr, "'update' without a prior 'fit' and without a previous parameter file:\n");
-	    fprintf(stderr, " all variables will be marked '# FIXED'!\n");
-#endif
+	    Eex("Nothing to update!");
 	}
 
 	if (!(nf = fopen(ofilename, "w")))
@@ -1552,8 +1544,7 @@ update(char *pfile, char *npfile)
 		udv = udv->next_udv;
 		continue;
 	    }
-	    if (!udv->udv_undef &&
-	        ((udv->udv_value.type == INTGR) || (udv->udv_value.type == CMPLX))) {
+	    if ((udv->udv_value.type == INTGR) || (udv->udv_value.type == CMPLX)) {
 		int k;
 
 		/* ignore indep. variables */
@@ -1662,39 +1653,16 @@ update(char *pfile, char *npfile)
 
 
 /*****************************************************************
-    Backup a file by renaming it to something useful. Return
-    the new name in tofile
+    Backup a file by renaming it to something useful.
+    Return the new name in tofile.
+    NB: tofile must point to a char array[] or allocated data.
+	See update()
 *****************************************************************/
-
-/* tofile must point to a char array[] or allocated data. See update() */
-
+#ifdef MSDOS
 static void
 backup_file(char *tofile, const char *fromfile)
 {
-#if defined(MSDOS) || defined(VMS)
     char *tmpn;
-#endif
-
-/* first attempt, for all o/s other than MSDOS */
-
-#ifndef MSDOS
-    strcpy(tofile, fromfile);
-#ifdef VMS
-    /* replace all dots with _, since we will be adding the only
-     * dot allowed in VMS names
-     */
-    while ((tmpn = strchr(tofile, '.')) != NULL)
-	*tmpn = '_';
-#endif /*VMS */
-    strcat(tofile, BACKUP_SUFFIX);
-    if (rename(fromfile, tofile) == 0)
-	return;			/* hurrah */
-    if (existfile(tofile))
-	Eex2("The backup file %s already exists and will not be overwritten.", tofile);
-#endif
-
-#ifdef MSDOS
-    /* first attempt for msdos. */
 
     /* Copy only the first 8 characters of the filename, to comply
      * with the restrictions of FAT filesystems. */
@@ -1707,12 +1675,24 @@ backup_file(char *tofile, const char *fromfile)
 
     if (rename(fromfile, tofile) == 0)
 	return;			/* success */
-#endif /* MSDOS */
 
     /* get here => rename failed. */
     Eex3("Could not rename file %s to %s", fromfile, tofile);
 }
+#endif /* MSDOS */
 
+#ifndef MSDOS
+static void
+backup_file(char *tofile, const char *fromfile)
+{
+    strcpy(tofile, fromfile);
+    strcat(tofile, BACKUP_SUFFIX);
+    if (rename(fromfile, tofile) != 0)
+	Eex2("Error writing backup file %s", tofile);
+}
+#endif /* not MSDOS */
+
+/* End DEPRECATED section */
 
 /* Modified from save.c:save_range() */
 static void
@@ -1837,19 +1817,23 @@ fit_command()
     static const int iz = MAX_NUM_VAR;
 
     int i, j;
-    double v[MAXDATACOLS];
+    double v[MAX_NUM_VAR+2];
     double tmpd;
     time_t timer;
     int token1, token2, token3;
+    int fit_token;
     char *tmp, *file_name;
     TBOOLEAN zero_initial_value;
+    AXIS *fit_xaxis, *fit_yaxis, *fit_zaxis;
 
-    c_token++;
-
-    /* FIXME EAM - I don't understand what these are needed for. */
     x_axis = FIRST_X_AXIS;
     y_axis = FIRST_Y_AXIS;
     z_axis = FIRST_Z_AXIS;
+    fit_xaxis = &axis_array[FIRST_X_AXIS];
+    fit_yaxis = &axis_array[FIRST_Y_AXIS];
+    fit_zaxis = &axis_array[FIRST_Z_AXIS];
+
+    fit_token = c_token++;
 
     /* First look for a restricted fit range... */
     /* Start with the current range limits on variable 1 ("x"),
@@ -1857,37 +1841,37 @@ fit_command()
      * Historically variables 3-5 inherited the current range of t, u, and v
      * but no longer.  NB: THIS IS A CHANGE
      */
-    AXIS_INIT3D(x_axis, 0, 0);
-    AXIS_INIT3D(y_axis, 0, 0);
-    AXIS_INIT3D(z_axis, 0, 1);
+    axis_init(fit_xaxis, 0);
+    axis_init(fit_yaxis, 0);
+    axis_init(fit_zaxis, 1);
     for (i = 0; i < MAX_NUM_VAR+1; i++)
 	dummy_token[i] = -1;
-    range_min[0] = axis_array[x_axis].min;
-    range_max[0] = axis_array[x_axis].max;
-    range_autoscale[0] = axis_array[x_axis].autoscale;
-    range_min[1] = axis_array[y_axis].min;
-    range_max[1] = axis_array[y_axis].max;
-    range_autoscale[1] = axis_array[y_axis].autoscale;
+    range_min[0] = fit_xaxis->min;
+    range_max[0] = fit_xaxis->max;
+    range_autoscale[0] = fit_xaxis->autoscale;
+    range_min[1] = fit_yaxis->min;
+    range_max[1] = fit_yaxis->max;
+    range_autoscale[1] = fit_yaxis->autoscale;
     for (i = 2; i < MAX_NUM_VAR; i++) {
 	range_min[i] = VERYLARGE;
 	range_max[i] = -VERYLARGE;
 	range_autoscale[i] = AUTOSCALE_BOTH;
     }
-    range_min[iz] = axis_array[z_axis].min;
-    range_max[iz] = axis_array[z_axis].max;
-    range_autoscale[iz] = axis_array[z_axis].autoscale;
+    range_min[iz] = fit_zaxis->min;
+    range_max[iz] = fit_zaxis->max;
+    range_autoscale[iz] = fit_zaxis->autoscale;
 
     num_ranges = 0;
     while (equals(c_token, "[")) {
+	AXIS *scratch_axis = &axis_array[SAMPLE_AXIS];
 	if (i > MAX_NUM_VAR)
 	    Eexc(c_token, "too many range specifiers");
-	/* NB: This has nothing really to do with the Z axis, we're */
-	/* just using that slot of the axis array as scratch space. */
-	AXIS_INIT3D(SECOND_Z_AXIS, 0, 1);
-	dummy_token[num_ranges] = parse_range(SECOND_Z_AXIS);
-	range_min[num_ranges] = axis_array[SECOND_Z_AXIS].min;
-	range_max[num_ranges] = axis_array[SECOND_Z_AXIS].max;
-	range_autoscale[num_ranges] = axis_array[SECOND_Z_AXIS].autoscale;
+	axis_init(scratch_axis, 1);
+	scratch_axis->linked_to_primary = NULL;
+	dummy_token[num_ranges] = parse_range(scratch_axis->index);
+	range_min[num_ranges] = scratch_axis->min;
+	range_max[num_ranges] = scratch_axis->max;
+	range_autoscale[num_ranges] = scratch_axis->autoscale;
 	num_ranges++;
     }
 
@@ -1934,7 +1918,7 @@ fit_command()
     /* the limit on parameters passed to a user-defined function.		*/
     /* I.e. we expect that MAXDATACOLS >= MAX_NUM_VAR + 2			*/
 
-    columns = df_open(file_name, MAXDATACOLS, NULL);
+    columns = df_open(file_name, MAX_NUM_VAR+2, NULL);
     if (columns < 0)
 	Eexc2(token2, "Can't read data from", file_name);
     free(file_name);
@@ -1942,8 +1926,8 @@ fit_command()
 	Eexc(c_token, "Need more than 1 input data column");
 
     /* Allow time data only on first two dimensions (x and y) */
-    df_axis[0] = x_axis;
-    df_axis[1] = y_axis;
+    df_axis[0] = FIRST_X_AXIS;
+    df_axis[1] = FIRST_Y_AXIS;
 
     /* BM: New options to distinguish fits with and without errors */
     /* reset error columns */
@@ -2069,7 +2053,7 @@ fit_command()
     if (num_ranges > num_indep+1)
 	Eexc2(dummy_token[num_ranges-1], "Too many range-specs for a %d-variable fit", num_indep);
     if (num_ranges == (num_indep + 1)) {
-	/* last range was actually for the dependent variable */
+	/* last range was actually for the independen variable */
 	range_min[iz] = range_min[num_indep];
 	range_max[iz] = range_max[num_indep];
 	range_autoscale[iz] = range_autoscale[num_indep];
@@ -2520,15 +2504,12 @@ fit_command()
 	free(last_dummy_var[i]);
 	last_dummy_var[i] = gp_strdup(c_dummy_var[i]);
     }
-    /* remember last fit command for 'save' */
+    /* remember last fit command for 'save fit' */
+    /* FIXME: This breaks if there is a ; internal to the fit command */
     free(last_fit_command);
-    last_fit_command = strdup(gp_input_line);
-    for (i = 0; i < num_tokens; i++) {
-	if (equals(i,";")) {
-	    last_fit_command[token[i].start_index] = '\0';
-	    break;
-	}
-    }
+    last_fit_command = strdup(&gp_input_line[token[fit_token].start_index]);
+    if (strchr(last_fit_command,';'))
+	*strchr(last_fit_command,';') = '\0';
     /* save fit command to user variable */
     fill_gpval_string("GPVAL_LAST_FIT", last_fit_command);
 }
@@ -2584,6 +2565,12 @@ getfitlogfile()
     if (fitlogfile == NULL) {
 	char *tmp = getenv(GNUFITLOG);	/* open logfile */
 
+	/* If GNUFITLOG is defined but null, do not write to log file */
+	if (tmp != NULL && *tmp == '\0') {
+	    fit_suppress_log = TRUE;
+	    return NULL;
+	}
+
 	if (tmp != NULL && *tmp != '\0') {
 	    char *tmp2 = tmp + (strlen(tmp) - 1);
 
@@ -2605,4 +2592,41 @@ getfitlogfile()
 	logfile = gp_strdup(fitlogfile);
     }
     return logfile;
+}
+
+
+/*
+ * replacement for "update", which is now deprecated.
+ * write current value of parameters used in previous fit to a file.
+ * That file can be used as an argument to 'via' in a subsequent fit command.
+ */
+void
+save_fit(FILE *fp)
+{
+    struct udvt_entry *udv;
+    int k;
+
+    if ((last_fit_command == NULL) || (strlen(last_fit_command) == 0)) {
+	int_warn(NO_CARET, "no previous fit command");
+	return;
+    } else {
+	fputs("# ", fp);
+	fputs(last_fit_command, fp);
+	fputs("\n", fp);
+	udv = get_udv_by_name("FIT_STDFIT");
+	if (udv)
+	    fprintf(fp,"# final sum of squares of residuals : %g\n",
+			udv->udv_value.v.cmplx_val.real);
+    }
+
+    for (k = 0; k < last_num_params; k++) {
+	udv = get_udv_by_name(last_par_name[k]);
+	if (udv->udv_value.type == INTGR)
+	    fprintf(fp, "%-15s = %-22i\n", udv->udv_name, udv->udv_value.v.int_val);
+	else if (udv->udv_value.type == CMPLX)
+	    fprintf(fp, "%-15s = %-22s\n", udv->udv_name, num_to_str(udv->udv_value.v.cmplx_val.real));
+	else
+	    int_warn(NO_CARET, "Parameter %s is not INTGR or CMPLX", udv->udv_name);
+    }
+    return;
 }

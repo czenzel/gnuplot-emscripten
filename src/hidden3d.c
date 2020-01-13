@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: hidden3d.c,v 1.99.2.5 2015/05/05 19:01:16 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - hidden3d.c */
 
 /*[
@@ -134,7 +130,7 @@ static char *RCSid() { return RCSid("$Id: hidden3d.c,v 1.99.2.5 2015/05/05 19:01
 
 /* The actual configuration is stored in these variables, modifiable
  * at runtime through 'set hidden3d' options */
-static int hiddenBacksideLinetypeOffset = BACKSIDE_LINETYPE_OFFSET;
+       int hiddenBacksideLinetypeOffset = BACKSIDE_LINETYPE_OFFSET;
 static long hiddenTriangleLinesdrawnPattern = TRIANGLE_LINESDRAWN_PATTERN;
 static int hiddenHandleUndefinedPoints = HANDLE_UNDEFINED_POINTS;
 static int hiddenShowAlternativeDiagonal = SHOW_ALTERNATIVE_DIAGONAL;
@@ -303,8 +299,8 @@ static void color_edges __PROTO((long int new_edge, long int old_edge,
 				 int style_above, int style_below));
 static void build_networks __PROTO((struct surface_points * plots,
 				    int pcount));
-int compare_edges_by_zmin __PROTO((SORTFUNC_ARGS p1, SORTFUNC_ARGS p2));
-int compare_polys_by_zmax __PROTO((SORTFUNC_ARGS p1, SORTFUNC_ARGS p2));
+static int compare_edges_by_zmin __PROTO((SORTFUNC_ARGS p1, SORTFUNC_ARGS p2));
+static int compare_polys_by_zmax __PROTO((SORTFUNC_ARGS p1, SORTFUNC_ARGS p2));
 static void sort_edges_by_z __PROTO((void));
 static void sort_polys_by_z __PROTO((void));
 static TBOOLEAN get_plane __PROTO((p_polygon p, t_plane plane));
@@ -528,7 +524,7 @@ store_vertex (
 
 #ifdef HIDDEN3D_VAR_PTSIZE
     /* Store pointer back to original point */
-    /* Needed to support variable pointsize */
+    /* Needed to support variable pointsize or pointtype */
     thisvert->original = point;
 #endif
 	
@@ -557,10 +553,12 @@ make_edge(
 	thisedge->v1 = vnum1;
 	thisedge->v2 = vnum2;
 	if (lp->p_type == PT_ARROWHEAD) thisedge->style = PT_ARROWHEAD;
+	if (lp->p_type == PT_BACKARROW) thisedge->style = PT_BACKARROW;
     } else {
 	thisedge->v1 = vnum2;
 	thisedge->v2 = vnum1;
 	if (lp->p_type == PT_ARROWHEAD) thisedge->style = PT_BACKARROW;
+	if (lp->p_type == PT_BACKARROW) thisedge->style = PT_ARROWHEAD;
     }
 
     return thisedge - elist;
@@ -1051,7 +1049,7 @@ build_networks(struct surface_points *plots, int pcount)
 	long int crvlen;
 	
 	/* Quietly skip empty plots */
-	if (this_plot->plot_type == NODATA)
+	if (this_plot->plot_type == NODATA || this_plot->plot_type == KEYENTRY)
 	    continue;
 
 	crvlen = this_plot->iso_crvs->p_count;
@@ -1068,14 +1066,14 @@ build_networks(struct surface_points *plots, int pcount)
 
 	/* count 'curves' (i.e. isolines) and vertices in this plot */
 	nverts = 0;
-	if(this_plot->plot_type == FUNC3D) {
+	if (this_plot->plot_type == FUNC3D) {
 	    ncrvs = 0;
-	    for(icrvs = this_plot->iso_crvs;
+	    for (icrvs = this_plot->iso_crvs;
 		icrvs; icrvs = icrvs->next) {
 		ncrvs++;
 	    }
 	    nverts += ncrvs * crvlen;
-	} else if(this_plot->plot_type == DATA3D) {
+	} else if (this_plot->plot_type == DATA3D) {
 	    ncrvs = this_plot->num_iso_read;
 	    if (this_plot->has_grid_topology)
 		nverts += ncrvs * crvlen;
@@ -1087,7 +1085,7 @@ build_networks(struct surface_points *plots, int pcount)
 		    nverts += icrvs->p_count;
 	    }
 	} else {
-	    graph_error("Plot type is neither function nor data");
+	    /* Cannot happen */
 	    return;
 	}
 
@@ -1116,14 +1114,15 @@ build_networks(struct surface_points *plots, int pcount)
 	    nv += 2 * nverts;
 	    ne += nverts;
 	    break;
-	case DOTS:
-	    this_plot->lp_properties.flags |= LP_SHOW_POINTS;
-	    this_plot->lp_properties.p_type = -1;
 	case IMAGE:
 	case RGBIMAGE:
 	case RGBA_IMAGE:
 	    /* Ignore these */
 	    break;
+	case DOTS:
+	    this_plot->lp_properties.flags |= LP_SHOW_POINTS;
+	    this_plot->lp_properties.p_type = -1;
+	    /* fall through */
 	case POINTSTYLE:
 	default:
 	    /* treat all remaining ones like 'points' */
@@ -1162,14 +1161,14 @@ build_networks(struct surface_points *plots, int pcount)
 	lp = &(this_plot->lp_properties);
 
 	/* Quietly skip empty plots */
-	if (this_plot->plot_type == NODATA)
+	if (this_plot->plot_type == NODATA || this_plot->plot_type == KEYENTRY)
 	    continue;
-
-	crvlen = this_plot->iso_crvs->p_count;
 
 	/* Allow individual plots to opt out of hidden3d calculations */
 	if (this_plot->opt_out_of_hidden3d)
 	    continue;
+
+	crvlen = this_plot->iso_crvs->p_count;
 
 	/* We can't use the linetype passed to us, because it has been through */
 	/* load_linetype(), which replaced the nominal linetype with the one   */
@@ -1200,11 +1199,14 @@ build_networks(struct surface_points *plots, int pcount)
 
 	if (this_plot->plot_style == VECTOR) {
 	    lp->p_type = PT_ARROWHEAD;
+	    if (this_plot->arrow_properties.head == BACKHEAD)
+		lp->p_type = PT_BACKARROW;
 	    if (this_plot->arrow_properties.head == NOHEAD) {
 		this_plot->arrow_properties.head_length= 1;
 		this_plot->arrow_properties.head_angle = 0;
 	    }
-	    apply_3dhead_properties(&(this_plot->arrow_properties));
+	    /* NB: It would not work to apply arrowhead properties now */
+	    /* because hidden3d code mixes arrows from multiple plots. */
 	}
 
 	/* HBB 20000715: new initialization code block for non-grid
@@ -1235,8 +1237,7 @@ build_networks(struct surface_points *plots, int pcount)
 			else
 			    labelpoint.CRD_COLOR = label->textcolor.lt;
 			
-			thisvertex = store_vertex(&labelpoint, 
-				&(this_plot->lp_properties), color_from_column);
+			thisvertex = store_vertex(&labelpoint, lp, color_from_column);
 			if (thisvertex < 0)
 			    continue;
 			(vlist+thisvertex)->label = label;
@@ -1245,9 +1246,13 @@ build_networks(struct surface_points *plots, int pcount)
 
 		} else for (i = 0; i < icrvs->p_count; i++) {
 		    long int thisvertex, basevertex;
+		    int interval = this_plot->lp_properties.p_interval;
 
-		    thisvertex = store_vertex(points + i, lp,
-					      color_from_column);
+		    /* NULL lp means don't draw a point at this vertex */
+		    if (this_plot->plot_style == LINESPOINTS && interval && (i % interval))
+			thisvertex = store_vertex(points + i, NULL, color_from_column);
+		    else
+			thisvertex = store_vertex(points + i, lp, color_from_column);
 
 		    if (this_plot->plot_style == VECTOR) {
 			store_vertex(icrvs->next->points+i, 0, 0);
@@ -1457,9 +1462,11 @@ build_networks(struct surface_points *plots, int pcount)
 				     * all edges are new, so there is
 				     * no other polygon orientation to
 				     * consider */
-				    if (!plist[pnum].frontfacing)
-					elist[e1].style = elist[e2].style = elist[e3].style
-					    = below;
+				    if (pnum > -2) {
+					if (!plist[pnum].frontfacing)
+					    elist[e1].style = elist[e2].style
+						= elist[e3].style = below;
+				    }
 				}
 			    }
 			}
@@ -1526,8 +1533,7 @@ build_networks(struct surface_points *plots, int pcount)
 /* Sort the elist in order of growing zmax. Uses qsort on an array of
  * plist indices, and then fills in the 'next' fields in struct
  * polygon to store the resulting order inside the plist */
-/* HBB 20010720: removed 'static' to avoid HP-sUX gcc bug */
-int
+static int
 compare_edges_by_zmin(SORTFUNC_ARGS p1, SORTFUNC_ARGS p2)
 {
     return SIGN(vlist[elist[*(const long *) p1].v2].z
@@ -1565,8 +1571,7 @@ sort_edges_by_z()
     free(sortarray);
 }
 
-/* HBB 20010720: removed 'static' to avoid HP-sUX gcc bug */
-int
+static int
 compare_polys_by_zmax(SORTFUNC_ARGS p1, SORTFUNC_ARGS p2)
 {
     return (SIGN(plist[*(const long *) p1].zmax
@@ -1659,7 +1664,7 @@ draw_vertex(p_vertex v)
     p_type = v->lp_style->p_type;
 
     TERMCOORD(v, x, y);
-    if ((p_type >= -1 || p_type == PT_CHARACTER) && !clip_point(x,y)) {
+    if ((p_type >= -1 || p_type == PT_CHARACTER || p_type == PT_VARIABLE) && !clip_point(x,y)) {
 	struct t_colorspec *tc = &(v->lp_style->pm3d_color);
 
 	if (v->label)  {
@@ -1672,7 +1677,7 @@ draw_vertex(p_vertex v)
 	    struct lp_style_type style = *(v->lp_style);
 	    load_linetype(&style, (int)v->real_z);
 	    tc = &style.pm3d_color;
-	    apply_pm3dcolor(tc, term);
+	    apply_pm3dcolor(tc);
 	}
 	else if (tc->type == TC_RGB && tc->lt == LT_COLORFROMCOLUMN)
 	    set_rgbcolor_var((unsigned int)v->real_z);
@@ -1689,9 +1694,13 @@ draw_vertex(p_vertex v)
 #endif
 
 	if (p_type == PT_CHARACTER)
-	    (term->put_text)(x, y, (char *)(&(v->lp_style->p_char)));
+	    (term->put_text)(x, y, v->lp_style->p_char);
+#ifdef HIDDEN3D_VAR_PTSIZE
+	else if (p_type == PT_VARIABLE)
+	    (term->point)(x, y, (int)(v->original->CRD_PTTYPE) - 1);
+#endif
 	else
-	    (term->point)(x,y, p_type);
+	    (term->point)(x, y, p_type);
 
 	/* vertex has been drawn --> flag it as done */
 	v->lp_style = NULL;
@@ -1768,14 +1777,30 @@ draw_edge(p_edge e, p_vertex v1, p_vertex v2)
     /* Only the original tip of an arrow should show an arrowhead */
     /* FIXME:  Arrowhead lines are not themselves subject to hidden line removal */
     if (arrow) {
-	if (e->v2 != v2-vlist && e->v1 != v1-vlist) {
+	/* FIXME: e->lp points to this_plot->lp_properties but what we need is */
+	/* a pointer to the immediately following field e->arrow_properties.   */
+	lp_style_type *lp = e->lp;
+	arrow_style_type *as = (arrow_style_type *)(&lp[1]);
+	apply_head_properties(as);
+	if (as->head == BOTH_HEADS)
+	    lptemp.p_type = PT_BOTHHEADS;
+
+	if (e->v2 != v2-vlist && e->v1 != v1-vlist)
 		lptemp.p_type = 0;
-	} else if (e->style == PT_BACKARROW) {
+
+	if (lptemp.p_type == PT_BACKARROW) {
 	    if (e->v2 == v2-vlist && e->v1 != v1-vlist)
 		lptemp.p_type = 0;
-	} else {
+	}
+	if (lptemp.p_type == PT_ARROWHEAD) {
 	    if (e->v1 == v1-vlist && e->v2 != v2-vlist)
 		lptemp.p_type = 0;
+	}
+	if (lptemp.p_type == PT_BOTHHEADS) {
+	    if (e->v1 == v1-vlist && e->v2 != v2-vlist)
+		lptemp.p_type = PT_BACKARROW;
+	    if (e->v2 == v2-vlist && e->v1 != v1-vlist)
+		lptemp.p_type = PT_ARROWHEAD;
 	}
     }
 
@@ -1953,8 +1978,8 @@ in_front(
     grid_y_low = coord_to_treecell(ymin);
     grid_y_high = coord_to_treecell(ymax);
 
-    for (grid_x = grid_x_low; grid_x <= grid_x_high; grid_x ++)
-	for (grid_y = grid_y_low; grid_y <= grid_y_high; grid_y ++)
+    for (grid_x = grid_x_low; grid_x <= grid_x_high; grid_x++)
+	for (grid_y = grid_y_low; grid_y <= grid_y_high; grid_y++)
 	    for (listhead = quadtree[grid_x][grid_y];
 		 listhead >= 0;
 		 listhead = qlist[listhead].next)
@@ -2280,7 +2305,7 @@ plot3d_hidden(struct surface_points *plots, int pcount)
     if (! edges.end) {
 	/* No drawable edges found. Free all storage and bail out. */
 	term_hidden_line_removal();
-	graph_error("*All* edges undefined or out of range, thus no plot.");
+	int_error(NO_CARET, "*All* edges undefined or out of range, thus no plot.");
     }
 
     if (! polygons.end) {

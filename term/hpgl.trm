@@ -1332,8 +1332,9 @@ HPGL2_set_font(const char *font)
     }
 /* determine font, use default from options if invalid */
     sep = strcspn(font, ",");
-    strncpy(name, font, sep);
-    name[sep] = NUL;
+    strncpy(name, font, sizeof(name));
+    if (sep < sizeof(name))
+	name[sep] = NUL;
     for (i = 0; i < HPGL2_FONTS; i++) {
 	sep2 = strcspn(HPGL2_font_table[i].compare, "$");
 	if (strncmp(name, HPGL2_font_table[i].compare, sep2) == 0)

@@ -1,6 +1,6 @@
 <!DOCTYPE HTML>
 <html>
-<head><title>Gnuplot Version 5 SVG terminal demos</title>
+<head><title>Demos for gnuplot Version 5.2 (SVG terminal)</title>
 <link type="text/css" href="gnuplot_demo.css" rel="stylesheet">
 <meta charset="UTF-8">
 </head>
@@ -8,16 +8,15 @@
 <body>
 
 <h2 align=center>
-    Gnuplot Version 5 SVG terminal demos<br>
+    Gnuplot Version 5.2 demos (SVG terminal)<br>
     See also the demo output for the 
-       <a href="../demo_5.0/">PNG</a> and
-       <a href="../demo_canvas_5.0/">canvas</a> terminals.
+       <a href="../demo_5.2/">PNG</a> and
+       <a href="../demo_canvas_5.2/">canvas</a> terminals.
 </h2>
 
 <p>
 Here are samples of SVG output from demos included with the gnuplot
-distribution. They were generated using a pre-release copy of
-gnuplot version 5.
+distribution.
 Note that individual plots can be toggled on/off by clicking on
 the corresponding key entry.  Clicking in the plot area should turn
 on mouse-coordinate tracking.
@@ -33,8 +32,9 @@ on mouse-coordinate tracking.
     <li><a href="fillcrvs.html">filled&nbsp;curves</a></li>
     <li><a href="fillbetween.html">fill&nbsp;between&nbsp;curves</a></li>
     <li><a href="candlesticks.html">candlesticks</a></li>
-    <li><a href="mgr.html">error bars</a></li>
+    <li><a href="errorbars.html">error bars</a></li>
     <li><a href="histograms.html">histograms</a> (<a href="histograms2.html">more</a>)</li>
+    <li><a href="boxclusters.html">bar graphs</a>
     <li><a href="steps.html">step functions</a></li>
     <li><a href="multiaxis.html">multiple axis scales</a></li>
     <li><a href="using.html">mixing styles</a></li>
@@ -46,13 +46,12 @@ on mouse-coordinate tracking.
     <li><a href="circles.html">circles</a></li>
     <li><a href="boxplot.html">boxplot</a></li>
     <li><a href="rugplot.html">rug plot</a></li>
+    <li><a href="jitter.html">jitter (bee&nbsp;swarm)</a></li>
     </ul>
 
     <h4>Math functions</h4>
     <ul>
     <li><a href="approximate.html">approximation</a></li>
-    <li><a href="spline.html">B-splines</a></li>
-    <li><a href="airfoil.html">Bezier splines</a></li>
     <li><font color=gray>complex trig functions</font></li>
     <li><a href="cerf.html">complex error function</font></li>
     <li><a href="prob2.html">probability</a></li>
@@ -60,6 +59,14 @@ on mouse-coordinate tracking.
     <li><a href="random.html">random numbers</a></li>
     <li><a href="bivariat.html">recursion, etc...</a></li>
     <li><a href="stats.html">data statistics</a></li>
+    </ul>
+
+    <h4>Curve fitting</h4>
+    <ul>
+    <li><a href="smooth_splines.html">cubic and Bezier splines</a></li>
+    <li><a href="monotonic_spline.html">monotonic csplines</a></li>
+    <li><a href="spline.html">explicit B-splines</a></li>
+    <li><a href="airfoil.html">explicit Bezier splines</a></li>
     </ul>
 
 </td>
@@ -75,15 +82,23 @@ on mouse-coordinate tracking.
     <li><a href="pm3d.html">pm3d coloring</a></li>
     <li><a href="hidden2.html">pm3d hidden surfaces</a></li>
     <li><a href="world2.html">3D mapping</a></li>
+    <li><a href="zerror.html">shaded error region</a></li>
+    <li><a href="azimuth.html">azimuth</a></li>
+    <li><a href="armillary.html">circles and polygons</a></li>
+    <li><a href="pm3d_lighting.html">lighting model</a></li>
     </ul>
 
     <h4>Coordinate and<br> axis transforms</h4>
     <ul>
     <li><a href="linkedaxes.html">linked axes</a></li>
-    <li><a href="polar.html">polar coords</a></li>
+    <li><a href="nonlinear3.html">nonlinear axes</a></li>
+    <li><a href="nonlinear1.html">broken axes</a></li>
+    <li><a href="ttics.html">polar coords</a></li>
+    <li><a href="polar.html">polar functions</a></li>
     <li><a href="poldat.html">polar data</a></li>
     <li><a href="world.html">cylindrical/spherical</a></li>
     <li><a href="timedat.html">time/date coords</a></li>
+    <li><a href="sampling.html">coord sampling ranges</a></li>
     </ul>
 
     <h4>Binary and Image data </h4>
@@ -111,16 +126,23 @@ on mouse-coordinate tracking.
     <li><a href="iterate.html">iteration</a></li>
     <li><a href="scatter.html">non-gridded data</a></li>
     <li><a href="running_avg.html">running averages</a></li>
-    <li><a href="smooth.html">cummulative smoothing</a></li>
+    <li><a href="bins.html">automatic binning</a></li>
+    <li><a href="smooth.html">binning/histograms</a></li>
+    <li><a href="array.html">arrays</a></li>
+    <li><a href="fenceplot.html">fence plots</a></li>
     <li><a href="gantt.html">Gantt chart</a></li>
     <li><a href="heatmaps.html">2D and 3D heat maps</a></li>
+    <li><a href="solar_path.html">solar path diagram</a></li>
+    <li><a href="violinplot.html">violin plot</a></li>
     </ul>
 
     <h4>Text options</h4>
     <ul>
+    <li><a href="rotate_labels.html">rotated text</a></li>
     <li><a href="enhanced_utf8.html">enhanced text</a></li>
     <li><a href="datastrings.html">string data</a></li>
     <li><a href="stringvar.html">string variables</a></li>
+    <li><font color=gray>boxed text (no svg support)</font></li>
     <li><a href="cities.html">variable font size</a></li>
     <li><a href="hypertext.html">hypertext</a></li>
     </ul>
@@ -132,7 +154,7 @@ on mouse-coordinate tracking.
     <li><a href="margins.html">aligned plots</a></li>
     <li><a href="ellipse.html">axis location</a></li>
     <li><a href="rectangle.html">rectangles</a></li>
-    <li><a href="nokey.html">end-labeled plots</a></li>
+    <li><a href="custom_key.html">customized key</a></li>
     </ul>
 
     <h4>Styles</h4>
@@ -144,10 +166,6 @@ on mouse-coordinate tracking.
     <li><a href="transparent_solids.html">transparent solids</a></li>
     </ul>
 
-    <h4>Animation</h4>
-    <ul>
-    <li><font color=gray>not supported</font></li>
-    </ul>
 </td>
 
 <td align=center valign=bot>
@@ -180,7 +198,7 @@ on mouse-coordinate tracking.
 <tbody><tr valign="top">
 
     <td>
-    <i>This page created by Ethan Merritt<br>April 2014</i>
+    <i>This page generated June 2017</i>
     </td>
 
     <td>

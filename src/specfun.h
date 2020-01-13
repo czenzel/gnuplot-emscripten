@@ -1,5 +1,5 @@
 /*
- * $Id: specfun.h,v 1.13 2013/07/13 05:52:44 sfeam Exp $
+ * $Id: specfun.h,v 1.12 2013/05/08 03:57:54 markisch Exp $
  */
 
 /* GNUPLOT - specfun.h */

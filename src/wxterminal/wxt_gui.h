@@ -1,5 +1,5 @@
 /*
- * $Id: wxt_gui.h,v 1.48.2.8 2016/08/26 04:16:01 sfeam Exp $
+ * $Id: wxt_gui.h,v 1.58 2016/09/22 07:09:42 markisch Exp $
  */
 
 /* GNUPLOT - wxt_gui.h */
@@ -105,6 +105,9 @@
 /* Debugging support, required to turn off asserts */
 #include <wx/debug.h>
 
+/* printer data */
+#include <wx/cmndata.h>
+
 /* c++ vectors and lists, used to store gnuplot commands */
 #include <vector>
 #include <list>
@@ -127,6 +130,8 @@ extern "C" {
 # include "command.h"
 /* for int_error */
 # include "util.h"
+/* for wrap_readline_signal_handler */
+# include "readline.h"
 }
 
 /* if the gtk headers are available, use them to tweak some behaviours */
@@ -164,6 +169,14 @@ extern "C" {
 #else
 # error "wxt does not know if this platform has to be single- or multi-threaded"
 #endif
+#endif
+
+/* Enable the print dialog on Windows only
+ */
+#ifdef __WXMSW__
+# ifndef WXT_PRINT
+#  define WXT_PRINT
+# endif
 #endif
 
 extern "C" {
@@ -404,6 +417,7 @@ public :
 	void wxt_cairo_refresh();
 	void wxt_cairo_exec_command(gp_command command);
 	void wxt_cairo_draw_hypertext();
+	void wxt_cairo_draw_hyperimage();
 
 	/* the plot structure, defined in gp_cairo.h */
 	plot_struct plot;
@@ -432,8 +446,6 @@ private:
 #if defined(GTK_SURFACE)
 	GdkPixmap *gdkpixmap;
 #elif defined(__WXMSW__)
-	HDC hdc;
-	HBITMAP hbm;
 #else /* generic 'image' surface */
 	unsigned int *data32;
 	wxBitmap* cairo_bitmap;
@@ -490,6 +502,9 @@ public:
 	void OnSize( wxSizeEvent& event );
 	void OnCopy( wxCommandEvent& event );
 	void OnExport( wxCommandEvent& event );
+#ifdef WXT_PRINT
+	void OnPrint( wxCommandEvent& event );
+#endif
 #ifdef USE_MOUSE
 	void OnReplot( wxCommandEvent& event );
 	void OnToggleGrid( wxCommandEvent& event );
@@ -513,7 +528,10 @@ public:
 
 private:
 	wxtConfigDialog * config_dialog;
-
+#ifdef WXT_PRINT
+	// persistent printer choice and settings
+	wxPrintData printData;
+#endif
 	/* any class wishing to process wxWidgets events must use this macro */
 	DECLARE_EVENT_TABLE()
 };
@@ -523,6 +541,9 @@ enum {
 /* start at wxID_HIGHEST to avoid collisions */
 Toolbar_CopyToClipboard = wxID_HIGHEST,
 Toolbar_ExportToFile,
+#ifdef WXT_PRINT
+Toolbar_Print,
+#endif
 Toolbar_Replot,
 Toolbar_ToggleGrid,
 Toolbar_ZoomPrevious,

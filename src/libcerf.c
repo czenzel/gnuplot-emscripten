@@ -1,5 +1,5 @@
 /*
- * $Id: libcerf.c,v 1.1 2013/07/13 05:52:43 sfeam Exp $
+ * $Id: libcerf.c,v 1.0 2013/07/12 18:11:05 sfeam Exp $
  */
 /*
  * Complex error function (cerf) and related special functions from libcerf.
@@ -9,7 +9,8 @@
  * Ethan A Merritt - July 2013
  */
 
-#include "syscfg.h"
+#include "gp_types.h"
+
 #ifdef HAVE_LIBCERF
 #include <complex.h>	/* C99 _Complex */
 #include <cerf.h>	/* libcerf library header */

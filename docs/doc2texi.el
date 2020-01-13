@@ -298,8 +298,6 @@ Major contributors (alphabetic order):
 	"metapost"
 	"mgr"
 	"mif"
-	"next"
-	"openstep"
 	"pbm"
 	"pc"
 	"pdf"
@@ -309,7 +307,6 @@ Major contributors (alphabetic order):
 	"pstricks"
 	"qms"
 	"regis"
-	"sun"
 	"svg"
 	"t410x"
 	"table"
@@ -399,6 +396,7 @@ particular conversion chore."
   ;; convert the buffer from doc to texi, one element at a time
   (message "Converting to texinfo ...")
   (d2t-braces-atsigns)   ;; this must be the first conversion function
+  (d2t-transitem)        ;; translate new list item
   (d2t-comments)         ;; delete comments
   (d2t-sectioning)       ;; chapters, sections, etc
   (d2t-get-eldoc-strings)
@@ -451,13 +449,11 @@ particular conversion chore."
   '(("linux" "linux")
     ("canvas" "canvas")
     ("lua" "lua" "tikz")
-    ("mac" "mac" "openstep")
+    ("mac" "mac")
     ("beos" "be")
     ("dos" "emxvga" "djsvga" "fg" "pc")
     ("windows" "win")
-    ("next" "next")
     ("os2" "pm" "emxvga")
-    ("sun" "sun")
     ("vms" "vws"))
 
   "Additional terminals to add to the converted gnuplot.info file.
@@ -752,6 +748,23 @@ comment out the multi-word ? entries."
 	      (insert "@findex " (match-string 1) "\n@c "))
 	  (beginning-of-line)
 	  (insert "@c ")))) ))
+
+(defun d2t-transitem ()
+  "Translation lines beginning with #start, #end, #b, and ##.
+These lines makes a itemized list."
+  (and d2t-verbose (message "  Doing d2t-transitem ..."))
+  (save-excursion
+    (while (re-search-forward "^#start" (point-max) "to_end")
+      (replace-match "@itemize @bullet" t))
+    (goto-char (point-min))
+    (while (re-search-forward "^#end" (point-max) "to_end")
+      (replace-match "@end itemize" t))
+    (goto-char (point-min))
+    (while (re-search-forward "^#b" (point-max) "to_end")
+      (replace-match "@item\n" t))
+    (goto-char (point-min))
+    (while (re-search-forward "^##" (point-max) "to_end")
+      (replace-match "" t))))
 
 (defun d2t-comments ()
   "Delete comments and lines beginning with # or %.

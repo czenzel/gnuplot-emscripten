@@ -49,23 +49,22 @@
 #if defined(HAVE_LIBREADLINE)
 # include "stdfn.h"	/* <readline/readline.h> needs stdio.h... */
 # include <readline/readline.h>
-#endif
-#if defined(HAVE_LIBEDITLINE)
+
+#elif defined(HAVE_LIBEDITLINE)
 # include <editline/readline.h>
 #endif
 
-#if defined(HAVE_LIBEDITLINE)
-int getc_wrapper __PROTO((FILE* fp));
+#if defined(READLINE)
+char *readline(const char *);
+
+#elif defined(HAVE_LIBREADLINE) || defined(HAVE_LIBEDITLINE)
+int getc_wrapper(FILE* fp);
 #endif
 
-#if defined(READLINE) && !defined(HAVE_LIBREADLINE) && !defined(HAVE_LIBEDITLINE)
-char *readline __PROTO((const char *));
+#if defined(HAVE_LIBREADLINE) && defined(HAVE_READLINE_SIGNAL_HANDLER)
+void wrap_readline_signal_handler(void);
+#else
+#define wrap_readline_signal_handler()
 #endif
-
-/*
- * The following 'readline_ipc' routine is usual 'readline' for OS2_IPC,
- * and a special one for IPC communication.
- */
-char *readline_ipc __PROTO((const char*));
 
 #endif /* GNUPLOT_READLINE_H */

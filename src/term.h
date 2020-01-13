@@ -1,5 +1,5 @@
 /*
- * $Id: term.h,v 1.66.2.2 2016/05/06 23:08:32 broeker Exp $
+ * $Id: term.h,v 1.72 2017/05/18 21:18:57 sfeam Exp $
  */
 
 /* GNUPLOT - term.h */
@@ -39,8 +39,7 @@
  *   Edit this file depending on the set of terminals you wish to support.
  * Comment out the terminal types that you don't want or don't have, and
  * uncomment those that you want included. Be aware that some terminal
- * types (eg, SUN) will require changes in the makefile
- * LIBS definition.
+ * types will require changes in the makefile LIBS definition.
  */
 
 /*
@@ -54,6 +53,9 @@
  * pslatex and epslatex support is now provided by the combination of
  * post.trm and pslatex.trm.  You cannot build pslatex without post.
  * Both drivers are selected by default, but you can disable them below.
+ * 
+ * Enhanced text support is pretty much required for all terminals now.
+ * If you build without GP_ENH_EST text layout will be degraded.
  */
 #define GP_ENH_EST 1		/* estimate string length of enhanced text */
 #define POSTSCRIPT_DRIVER 1	/* include post.trm */
@@ -63,6 +65,10 @@
 #define POSTSCRIPT_DRIVER
 #endif
 
+# ifdef GP_ENH_EST
+#  include "estimate.trm"	/* used for enhanced text processing */
+# endif
+
 
 /* Define SHORT_TERMLIST to select a few terminals. It is easier
  * to define the macro and list desired terminals in this section.
@@ -70,10 +76,6 @@
  */
 #ifdef SHORT_TERMLIST
 # include "dumb.trm"		/* dumb terminal */
-
-# ifdef GP_ENH_EST
-#  include "estimate.trm"	/* used for enhanced text processing */
-# endif
 
 # ifdef POSTSCRIPT_DRIVER
 #  ifdef  PSLATEX_DRIVER
@@ -133,23 +135,6 @@
 #endif /* MSDOS || _Windows */
 /****************************************************************************/
 
-
-/* NeXT */
-#ifdef NEXT
-# include "next.trm"
-#endif
-
-/* Apple Mac OS X Server 1.0 (Openstep Unix) */
-/* Apparently, Openstep code won't work on newer versions of
- * MacOS X. If someone can fix this, and provide a proper
- * configure test, let us know.
- */
-/*
- * #if defined(__APPLE__) && defined(__MACH__)
- * # include "openstep.trm"
- * #endif
-*/
-
 /* Apple Mac OS X */
 #ifdef HAVE_FRAMEWORK_AQUATERM
 /* support for AquaTerm.app */
@@ -181,11 +166,6 @@
 # endif
 #endif /* LINUXVGA */
 
-/* SunView */
-#ifdef SUN
-# include "sun.trm"
-#endif
-
 
 /* VAX Windowing System requires UIS libraries */
 #ifdef UIS
@@ -216,10 +196,6 @@
 #endif /* !MSDOS && !_Windows */
 /****************************************************************************/
 
-#ifdef GP_ENH_EST
-#include "estimate.trm"
-#endif
-
 
 /****************************************************************************/
 /* These terminals can be used on any system */
@@ -243,7 +219,7 @@
 #include "cgm.trm"
 
 /* CorelDraw! eps format */
-#include "corel.trm"
+/* #include "corel.trm"  */
 
 /* debugging terminal */
 #ifdef DEBUG
@@ -258,7 +234,8 @@
 # include "caca.trm"
 #endif
 
-/* DXF format for use with AutoCad (Release 10.x) */
+/* Terminal for export to AutoCad (Release 10.x) */
+/* DWGR10 format (1988) */
 #include "dxf.trm"
 
 /* Enhanced Metafile Format driver */
@@ -307,11 +284,10 @@
 #include "mif.trm"
 #endif
 
-/* Adobe Portable Document Format (PDF) */
-/* NOTE THAT PDF REQUIRES A SEPARATE LIBRARY : see term/pdf.trm */
-#ifdef HAVE_LIBPDF
-# include "pdf.trm"
-#endif
+/* DEPRECATED since 5.0.6
+ * PDF terminal based on non-free library PDFlib or PDFlib-lite from GmbH.
+ */
+/* # include "pdf.trm" */
 
 #if defined(HAVE_GD_PNG) || defined(HAVE_GD_JPEG) || defined(HAVE_GD_GIF)
 # include "gd.trm"

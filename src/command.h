@@ -1,5 +1,5 @@
 /*
- * $Id: command.h,v 1.66.2.2 2015/05/22 23:34:06 sfeam Exp $
+ * $Id: command.h,v 1.70 2015/08/08 18:32:17 sfeam Exp $
  */
 
 /* GNUPLOT - command.h */
@@ -142,11 +142,12 @@ void restore_prompt __PROTO((void));
 #else
 #define bind_command()
 #endif
-void refresh_request __PROTO((void));
-void refresh_command __PROTO((void));
+void array_command __PROTO((void));
+void break_command __PROTO((void));
 void call_command __PROTO((void));
 void changedir_command __PROTO((void));
 void clear_command __PROTO((void));
+void continue_command __PROTO((void));
 void eval_command __PROTO((void));
 void exit_command __PROTO((void));
 void help_command __PROTO((void));
@@ -167,6 +168,8 @@ void plot_command __PROTO((void));
 void print_command __PROTO((void));
 void printerr_command __PROTO((void));
 void pwd_command __PROTO((void));
+void refresh_request __PROTO((void));
+void refresh_command __PROTO((void));
 void replot_command __PROTO((void));
 void reread_command __PROTO((void));
 void save_command __PROTO((void));
@@ -175,6 +178,7 @@ void splot_command __PROTO((void));
 void stats_command __PROTO((void));
 void system_command __PROTO((void));
 void test_command __PROTO((void));
+void toggle_command __PROTO((void));
 void update_command __PROTO((void));
 void do_shell __PROTO((void));
 void undefine_command __PROTO((void));
@@ -187,6 +191,7 @@ int com_line __PROTO((void));
 int do_line __PROTO((void));
 void do_string __PROTO((const char* s));
 void do_string_and_free __PROTO((char* s));
+TBOOLEAN iteration_early_exit __PROTO((void));
 #ifdef USE_MOUSE
 void toggle_display_of_ipc_commands __PROTO((void));
 int display_ipc_commands __PROTO((void));

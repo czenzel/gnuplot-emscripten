@@ -84,8 +84,8 @@ DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/alpha.m4 \
 	$(top_srcdir)/m4/apple.m4 $(top_srcdir)/m4/beos.m4 \
-	$(top_srcdir)/m4/msdos.m4 $(top_srcdir)/m4/next.m4 \
-	$(top_srcdir)/m4/pkg.m4 $(top_srcdir)/configure.in
+	$(top_srcdir)/m4/msdos.m4 $(top_srcdir)/m4/pkg.m4 \
+	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 am__CONFIG_DISTCLEAN_FILES = config.status config.cache config.log \
@@ -251,6 +251,7 @@ LINUXSUID = @LINUXSUID@
 LN_S = @LN_S@
 LRELEASE = @LRELEASE@
 LTLIBOBJS = @LTLIBOBJS@
+LUA = @LUA@
 LUA_CFLAGS = @LUA_CFLAGS@
 LUA_LIBS = @LUA_LIBS@
 MAINT = @MAINT@
@@ -268,11 +269,9 @@ PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
 PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
-PANGO_1_10_2_CFLAGS = @PANGO_1_10_2_CFLAGS@
-PANGO_1_10_2_LIBS = @PANGO_1_10_2_LIBS@
+PATCHLEVEL = @PATCHLEVEL@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 PDFLATEX = @PDFLATEX@
-PDFLIB_CONFIG = @PDFLIB_CONFIG@
 PKG_CONFIG = @PKG_CONFIG@
 PLAINTEX = @PLAINTEX@
 QT_CFLAGS = @QT_CFLAGS@
@@ -345,10 +344,10 @@ top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign
-SUBDIRS = config m4 term src docs $(LISPDIR) man demo tutorial share
-EXTRA_DIST = BUGS CodeStyle Copyright FAQ.pdf GNUmakefile INSTALL INSTALL.gnu \
-Makefile.maint PATCHLEVEL PGPKEYS PORTING README RELEASE_NOTES \
-VERSION configure.vms pm3d win
+SUBDIRS = config m4 term src docs man demo tutorial share
+EXTRA_DIST = BUGS Copyright FAQ.pdf GNUmakefile INSTALL INSTALL.gnu \
+Makefile.maint PATCHLEVEL PGPKEYS README RELEASE_NOTES \
+VERSION configure.vms win
 
 DISTCLEANFILES = stamp-h
 ACLOCAL_AMFLAGS = -I m4

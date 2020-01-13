@@ -1,9 +1,9 @@
 /*
- * $Id: wgdiplus.cpp,v 1.16.2.9 2016/09/12 15:14:15 markisch Exp $
+ * $Id: wgdiplus.cpp,v 1.59.2.7 2017/08/15 14:03:10 markisch Exp $
  */
 
 /*
-Copyright (c) 2011-2014 Bastian Maerkisch. All rights reserved.
+Copyright (c) 2011-2017 Bastian Maerkisch. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
 are permitted provided that the following conditions are met:
@@ -27,18 +27,32 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// include iostream / cstdio _before_ syscfg.h in order
+// to avoid re-definition by wtext.h/winmain.c routines
+#include <iostream>
 extern "C" {
 # include "syscfg.h"
 }
+#define WINDOWS_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h>
 #define GDIPVER 0x0110
 #include <gdiplus.h>
+#include <tchar.h>
+#include <wchar.h>
+#ifdef __WATCOMC__
+// swprintf_s is missing from <cwchar>
+# define swprintf_s(s, c, f, ...) swprintf(s, c, f, __VA_ARGS__)
+#endif
 
 #include "wgdiplus.h"
 #include "wgnuplib.h"
+#include "winmain.h"
 #include "wcommon.h"
 using namespace Gdiplus;
+// do not use namespace std: otherwise MSVC complains about
+// ambiguous symbol bool
+//using namespace std;
 
 static bool gdiplusInitialized = false;
 static ULONG_PTR gdiplusToken;
@@ -47,14 +61,29 @@ static ULONG_PTR gdiplusToken;
 #define MINMAX(a,val,b) (((val) <= (a)) ? (a) : ((val) <= (b) ? (val) : (b)))
 const int pattern_num = 8;
 
+enum draw_target { DRAW_SCREEN, DRAW_PRINTER, DRAW_PLOTTER, DRAW_METAFILE };
 
 static Color gdiplusCreateColor(COLORREF color, double alpha);
-static Pen * gdiplusCreatePen(UINT style, float width, COLORREF color, double alpha);
-static void gdiplusPolyline(Graphics &graphics, Pen &pen, POINT *ppt, int polyi);
-static void gdiplusFilledPolygon(Graphics &graphics, Brush &brush, POINT *ppt, int polyi);
-static Brush * gdiplusPatternBrush(int style, COLORREF color, double alpha, COLORREF backcolor, BOOL transparent);
+static void gdiplusSetDashStyle(Pen *pen, enum DashStyle style);
+static void gdiplusPolyline(Graphics &graphics, Pen &pen, Point *points, int polyi);
+Brush * gdiplusPatternBrush(int style, COLORREF color, double alpha, COLORREF backcolor, BOOL transparent);
 static void gdiplusDot(Graphics &graphics, Brush &brush, int x, int y);
-static Font * SetFont_gdiplus(Graphics &graphics, LPRECT rect, LPGW lpgw, char * fontname, int size);
+static Font * SetFont_gdiplus(Graphics &graphics, LPRECT rect, LPGW lpgw, LPTSTR fontname, int size);
+static void do_draw_gdiplus(LPGW lpgw, Graphics &graphics, LPRECT rect, enum draw_target target);
+
+
+/* Internal state of enhanced text processing.
+*/
+
+static struct {
+	Graphics * graphics; /* graphics object */
+	Font * font;
+	SolidBrush * brush;
+	StringFormat *stringformat;
+} enhstate_gdiplus;
+
+
+/* ****************  ....   ************************* */
 
 
 void
@@ -88,173 +117,40 @@ gdiplusCreateColor(COLORREF color, double alpha)
 }
 
 
-static Pen *
-gdiplusCreatePen(UINT style, float width, COLORREF color, double alpha)
+static void
+gdiplusSetDashStyle(Pen *pen, enum DashStyle style)
 {
-	// create GDI+ pen
-	Color gdipColor = gdiplusCreateColor(color, alpha);
-	Pen * pen = new Pen(gdipColor, width > 1 ? width : 1);
-	if (style <= PS_DASHDOTDOT)
-		// cast is save since GDI and GDI+ use same numbers
-		pen->SetDashStyle(static_cast<DashStyle>(style));
-	pen->SetLineCap(LineCapSquare, LineCapSquare, DashCapFlat);
-	pen->SetLineJoin(LineJoinMiter);
+	const REAL dashstyles[4][6] = {
+		{ 16.f, 8.f },	// dash
+		{ 3.f, 3.f },	// dot
+		{ 8.f, 5.f, 3.f, 5.f }, // dash dot
+		{ 8.f, 4.f, 3.f, 4.f, 3.f, 4.f } // dash dot dot
+	};
+	const int dashstyle_len[4] = { 2, 2, 4, 6 };
 
-	return pen;
-}
-
-
-/* ****************  Mixed mode GDI/GDI+ functions ************************* */
-
-
-void
-gdiplusLine(HDC hdc, POINT x, POINT y, const PLOGPEN logpen, double alpha)
-{
-	gdiplusLineEx(hdc, x, y, logpen->lopnStyle, (float)logpen->lopnWidth.x, logpen->lopnColor, 0);
-}
-
-
-void
-gdiplusLineEx(HDC hdc, POINT x, POINT y, UINT style, float width, COLORREF color, double alpha)
-{
-	gdiplusInit();
-	Graphics graphics(hdc);
-
-	// Dash patterns get scaled with line width, in contrast to GDI.
-	// Avoid smearing out caused by antialiasing for small line widths.
-	if ((style == PS_SOLID) || (width >= 2.))
-		graphics.SetSmoothingMode(SmoothingModeAntiAlias);
-
-	Pen * pen = gdiplusCreatePen(style, width, color, alpha);
-	graphics.DrawLine(pen, (INT)x.x, (INT)x.y, (INT)y.x, (INT)y.y);
-	delete pen;
-}
-
-
-void
-gdiplusPolyline(HDC hdc, POINT *ppt, int polyi, const PLOGPEN logpen, double alpha)
-{
-	gdiplusPolylineEx(hdc, ppt, polyi, logpen->lopnStyle, (float)logpen->lopnWidth.x, logpen->lopnColor, alpha);
-}
-
-
-void
-gdiplusPolylineEx(HDC hdc, POINT *ppt, int polyi, UINT style, float width, COLORREF color, double alpha)
-{
-	gdiplusInit();
-	Graphics graphics(hdc);
-
-	// Dash patterns get scaled with line width, in contrast to GDI.
-	// Avoid smearing out caused by antialiasing for small line widths.
-	if ((style == PS_SOLID) || (width >= 2.))
-		graphics.SetSmoothingMode(SmoothingModeAntiAlias);
-
-	Pen * pen = gdiplusCreatePen(style, width, color, alpha);
-	Point * points = new Point[polyi];
-	for (int i = 0; i < polyi; i++) {
-		points[i].X = ppt[i].x;
-		points[i].Y = ppt[i].y;
-	}
-	if ((ppt[0].x != ppt[polyi - 1].x) || (ppt[0].y != ppt[polyi - 1].y))
-		graphics.DrawLines(pen, points, polyi);
+	style = static_cast<enum DashStyle>(style % 5);
+	if (style == 0)
+		pen->SetDashStyle(style);
 	else
-		graphics.DrawPolygon(pen, points, polyi - 1);
-	delete pen;
-	delete [] points;
-}
-
-
-void
-gdiplusSolidFilledPolygonEx(HDC hdc, POINT *ppt, int polyi, COLORREF color, double alpha, BOOL aa)
-{
-	gdiplusInit();
-	Graphics graphics(hdc);
-	if (aa)
-		graphics.SetSmoothingMode(SmoothingModeAntiAlias);
-
-	Color gdipColor = gdiplusCreateColor(color, alpha);
-	Point * points = new Point[polyi];
-	for (int i = 0; i < polyi; i++) {
-		points[i].X = ppt[i].x;
-		points[i].Y = ppt[i].y;
-	}
-	SolidBrush brush(gdipColor);
-	graphics.FillPolygon(&brush, points, polyi);
-	delete [] points;
-}
-
-
-void
-gdiplusPatternFilledPolygonEx(HDC hdc, POINT *ppt, int polyi, COLORREF color, double alpha, COLORREF backcolor, BOOL transparent, int style)
-{
-	gdiplusInit();
-	Graphics graphics(hdc);
-	graphics.SetSmoothingMode(SmoothingModeAntiAlias);
-
-	Color gdipColor = gdiplusCreateColor(color, alpha);
-	Color gdipBackColor = gdiplusCreateColor(backcolor, transparent ? 0 : 1.);
-	Brush * brush;
-	style %= 8;
-	const HatchStyle styles[] = { HatchStyleTotal, HatchStyleDiagonalCross,
-		HatchStyleZigZag, HatchStyleTotal,
-		HatchStyleForwardDiagonal, HatchStyleBackwardDiagonal,
-		HatchStyleLightDownwardDiagonal, HatchStyleDarkUpwardDiagonal };
-	switch (style) {
-		case 0:
-			brush = new SolidBrush(gdipBackColor);
-			break;
-		case 3:
-			brush = new SolidBrush(gdipColor);
-			break;
-		default:
-			brush = new HatchBrush(styles[style], gdipColor, gdipBackColor);
-	}
-	Point * points = new Point[polyi];
-	for (int i = 0; i < polyi; i++) {
-		points[i].X = ppt[i].x;
-		points[i].Y = ppt[i].y;
-	}
-	graphics.FillPolygon(brush, points, polyi);
-	delete [] points;
-	delete brush;
-}
-
-
-void
-gdiplusCircleEx(HDC hdc, POINT * p, int radius, UINT style, float width, COLORREF color, double alpha)
-{
-	gdiplusInit();
-	Graphics graphics(hdc);
-	graphics.SetSmoothingMode(SmoothingModeAntiAlias);
-
-	Pen * pen = gdiplusCreatePen(style, width, color, alpha);
-	graphics.DrawEllipse(pen, p->x - radius, p->y - radius, 2*radius, 2*radius);
-	delete pen;
+		pen->SetDashPattern(dashstyles[style - 1], dashstyle_len[style - 1]);
 }
 
 
 /* ****************  GDI+ only functions ********************************** */
 
 
-void
-gdiplusPolyline(Graphics &graphics, Pen &pen, POINT *ppt, int polyi)
+static void
+gdiplusPolyline(Graphics &graphics, Pen &pen, Point *points, int polyi)
 {
 	// Dash patterns get scaled with line width, in contrast to GDI.
 	// Avoid smearing out caused by antialiasing for small line widths.
 	SmoothingMode mode = graphics.GetSmoothingMode();
-	if ((mode != SmoothingModeNone) && (pen.GetDashStyle() != DashStyleSolid) && (pen.GetWidth() < 2))
-		graphics.SetSmoothingMode(SmoothingModeNone);
 
-	Point * points = new Point[polyi];
-	for (int i = 0; i < polyi; i++) {
-		points[i].X = ppt[i].x;
-		points[i].Y = ppt[i].y;
-	}
-	if ((ppt[0].x != ppt[polyi - 1].x) || (ppt[0].y != ppt[polyi - 1].y))
+	if ((points[0].X != points[polyi - 1].X) ||
+		(points[0].Y != points[polyi - 1].Y))
 		graphics.DrawLines(&pen, points, polyi);
 	else
 		graphics.DrawPolygon(&pen, points, polyi - 1);
-	delete [] points;
 
 	/* restore */
 	if (mode != SmoothingModeNone)
@@ -263,21 +159,40 @@ gdiplusPolyline(Graphics &graphics, Pen &pen, POINT *ppt, int polyi)
 
 
 static void
-gdiplusFilledPolygon(Graphics &graphics, Brush &brush, POINT *ppt, int polyi)
+gdiplusPolyline(Graphics &graphics, Pen &pen, PointF *points, int polyi)
 {
-	Point * points = new Point[polyi];
-	for (int i = 0; i < polyi; i++) {
-		points[i].X = ppt[i].x;
-		points[i].Y = ppt[i].y;
+	// Dash patterns get scaled with line width, in contrast to GDI.
+	// Avoid smearing out caused by antialiasing for small line widths.
+	SmoothingMode mode = graphics.GetSmoothingMode();
+
+	bool all_vert_or_horz = true;
+	for (int i = 1; i < polyi; i++)
+		if (!((points[i - 1].X == points[i].X) ||
+		      (points[i - 1].Y == points[i].Y)))
+			all_vert_or_horz = false;
+
+	// if all lines are horizontal or vertical we snap to nearest pixel
+	// to avoid "blurry" lines
+	if (all_vert_or_horz) {
+		for (int i = 0; i < polyi; i++) {
+			points[i].X = INT(points[i].X + 0.5);
+			points[i].Y = INT(points[i].Y + 0.5);
+		}
 	}
-	graphics.SetCompositingQuality(CompositingQualityGammaCorrected);
-	graphics.FillPolygon(&brush, points, polyi);
-	graphics.SetCompositingQuality(CompositingQualityDefault);
-	delete [] points;
+
+	if ((points[0].X != points[polyi - 1].X) ||
+	    (points[0].Y != points[polyi - 1].Y))
+		graphics.DrawLines(&pen, points, polyi);
+	else
+		graphics.DrawPolygon(&pen, points, polyi - 1);
+
+	/* restore */
+	if (mode != SmoothingModeNone)
+		graphics.SetSmoothingMode(mode);
 }
 
 
-static Brush *
+Brush *
 gdiplusPatternBrush(int style, COLORREF color, double alpha, COLORREF backcolor, BOOL transparent)
 {
 	Color gdipColor = gdiplusCreateColor(color, alpha);
@@ -314,7 +229,7 @@ gdiplusDot(Graphics &graphics, Brush &brush, int x, int y)
 
 
 static Font *
-SetFont_gdiplus(Graphics &graphics, LPRECT rect, LPGW lpgw, char * fontname, int size)
+SetFont_gdiplus(Graphics &graphics, LPRECT rect, LPGW lpgw, LPTSTR fontname, int size)
 {
 	if ((fontname == NULL) || (*fontname == 0))
 		fontname = lpgw->deffontname;
@@ -322,74 +237,226 @@ SetFont_gdiplus(Graphics &graphics, LPRECT rect, LPGW lpgw, char * fontname, int
 		size = lpgw->deffontsize;
 
 	/* make a local copy */
-	fontname = strdup(fontname);
+	fontname = _tcsdup(fontname);
 
 	/* save current font */
-	strcpy(lpgw->fontname, fontname);
+	_tcscpy(lpgw->fontname, fontname);
 	lpgw->fontsize = size;
 
-	/* extract font style */
+	// apply fontscale
+	size *= lpgw->fontscale;
+
+	/* set up font style */
 	INT fontStyle = FontStyleRegular;
-	char * italic, * bold, * underline, * strikeout;
-	if ((italic = strstr(fontname, " Italic")) != NULL)
+	LPTSTR italic, bold, underline, strikeout;
+	if ((italic = _tcsstr(fontname, TEXT(" Italic"))) != NULL)
 		fontStyle |= FontStyleItalic;
-	else if ((italic = strstr(fontname, ":Italic")) != NULL)
+	else if ((italic = _tcsstr(fontname, TEXT(":Italic"))) != NULL)
 		fontStyle |= FontStyleItalic;
-	if ((bold = strstr(fontname, " Bold")) != NULL)
+	if ((bold = _tcsstr(fontname, TEXT(" Bold"))) != NULL)
 		fontStyle |= FontStyleBold;
-	else if ((bold = strstr(fontname, ":Bold")) != NULL)
+	else if ((bold = _tcsstr(fontname, TEXT(":Bold"))) != NULL)
 		fontStyle |= FontStyleBold;
-	if ((underline = strstr(fontname, " Underline")) != NULL)
+	if ((underline = _tcsstr(fontname, TEXT(" Underline"))) != NULL)
 		fontStyle |= FontStyleUnderline;
-	if ((strikeout = strstr(fontname, " Strikeout")) != NULL)
+	if ((strikeout = _tcsstr(fontname, TEXT(" Strikeout"))) != NULL)
 		fontStyle |= FontStyleStrikeout;
 	if (italic) *italic = 0;
+	if (bold) *bold = 0;
+	if (underline) *underline = 0;
 	if (strikeout) *strikeout = 0;
-	if (bold) * bold = 0;
-	if (underline) * underline = 0;
 
+#ifdef UNICODE
+	const FontFamily * fontFamily = new FontFamily(fontname);
+#else
 	LPWSTR family = UnicodeText(fontname, lpgw->encoding);
-	free(fontname);
 	const FontFamily * fontFamily = new FontFamily(family);
 	free(family);
+#endif
+	free(fontname);
 	Font * font;
 	int fontHeight;
+	bool deleteFontFamily = true;
 	if (fontFamily->GetLastStatus() != Ok) {
 		delete fontFamily;
-#if defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR)
+#if (!defined(__MINGW32__) || defined(__MINGW64_VERSION_MAJOR))
 		// MinGW 4.8.1 does not have this
 		fontFamily = FontFamily::GenericSansSerif();
+		deleteFontFamily = false;
+#else
+#ifdef UNICODE
+		fontFamily = new FontFamily(GraphDefaultFont());
 #else
 		family = UnicodeText(GraphDefaultFont(), S_ENC_DEFAULT); // should always be available
 		fontFamily = new FontFamily(family);
 		free(family);
 #endif
-		font = new Font(fontFamily, size * lpgw->sampling, fontStyle, UnitPoint);
-		fontHeight = font->GetSize() / fontFamily->GetEmHeight(fontStyle) * graphics.GetDpiY() / 72. *
-			(fontFamily->GetCellAscent(fontStyle) + fontFamily->GetCellDescent(fontStyle));
-	} else {
-		font = new Font(fontFamily, size * lpgw->sampling, fontStyle, UnitPoint);
-		fontHeight = font->GetSize() / fontFamily->GetEmHeight(fontStyle) * graphics.GetDpiY() / 72. *
-			(fontFamily->GetCellAscent(fontStyle) + fontFamily->GetCellDescent(fontStyle));
-		delete fontFamily;
+#endif
 	}
+	font = new Font(fontFamily, size, fontStyle, UnitPoint);
+	double scale = font->GetSize() / fontFamily->GetEmHeight(fontStyle) * graphics.GetDpiY() / 72.;
+	/* store text metrics for later use */
+	lpgw->tmHeight = fontHeight = scale * (fontFamily->GetCellAscent(fontStyle) + fontFamily->GetCellDescent(fontStyle));
+	lpgw->tmAscent = scale * fontFamily->GetCellAscent(fontStyle);
+	lpgw->tmDescent = scale * fontFamily->GetCellDescent(fontStyle);
+	if (deleteFontFamily)
+		delete fontFamily;
 
 	RectF box;
-	graphics.MeasureString(L"0123456789", 10, font, PointF(0, 0), &box);
-	// lpgw->vchar = MulDiv(box.Height, lpgw->ymax, rect->bottom - rect->top);
+	graphics.MeasureString(L"0123456789", -1, font, PointF(0, 0), StringFormat::GenericTypographic(), &box);
 	lpgw->vchar = MulDiv(fontHeight, lpgw->ymax, rect->bottom - rect->top);
 	lpgw->hchar = MulDiv(box.Width, lpgw->xmax, 10 * (rect->right - rect->left));
-	lpgw->rotate = TRUE;
 	lpgw->htic = MulDiv(lpgw->hchar, 2, 5);
 	unsigned cy = MulDiv(box.Width, 2 * graphics.GetDpiY(), 50 * graphics.GetDpiX());
 	lpgw->vtic = MulDiv(cy, lpgw->ymax, rect->bottom - rect->top);
+
+	// Can always rotate text.
+	lpgw->rotate = TRUE;
 
 	return font;
 }
 
 
 void
+InitFont_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
+{
+	gdiplusInit();
+	Graphics graphics(hdc);
+	// call for the side effects:  set vchar/hchar and text metrics
+	Font * font = SetFont_gdiplus(graphics, rect, lpgw, lpgw->fontname, lpgw->fontsize);
+	// TODO:  save font object for later use
+	delete font;
+}
+
+
+static void
+EnhancedSetFont()
+{
+	if ((enhstate.lpgw->fontsize != enhstate.fontsize) ||
+	    (_tcscmp(enhstate.lpgw->fontname, enhstate.fontname) != 0)) {
+		if (enhstate_gdiplus.font)
+			delete enhstate_gdiplus.font;
+		enhstate_gdiplus.font = SetFont_gdiplus(*enhstate_gdiplus.graphics, enhstate.rect, enhstate.lpgw, enhstate.fontname, enhstate.fontsize);
+	}
+}
+
+
+static unsigned
+EnhancedTextLength(char * text)
+{
+	LPWSTR textw = UnicodeText(enhanced_text, enhstate.lpgw->encoding);
+	RectF box;
+	enhstate_gdiplus.graphics->MeasureString(textw, -1, enhstate_gdiplus.font, PointF(0, 0), enhstate_gdiplus.stringformat, &box);
+	free(textw);
+	return ceil(box.Width);
+}
+
+
+static void
+EnhancedPutText(int x, int y, char * text)
+{
+	LPWSTR textw = UnicodeText(text, enhstate.lpgw->encoding);
+	Graphics *g = enhstate_gdiplus.graphics;
+	if (enhstate.lpgw->angle == 0) {
+		PointF pointF(x, y + enhstate.lpgw->tmDescent);
+		g->DrawString(textw, -1, enhstate_gdiplus.font, pointF, enhstate_gdiplus.stringformat, enhstate_gdiplus.brush);
+	} else {
+		/* shift rotated text correctly */
+		g->TranslateTransform(x, y);
+		g->RotateTransform(-enhstate.lpgw->angle);
+		g->DrawString(textw, -1, enhstate_gdiplus.font, PointF(0, enhstate.lpgw->tmDescent), enhstate_gdiplus.stringformat, enhstate_gdiplus.brush);
+		g->ResetTransform();
+	}
+	free(textw);
+}
+
+
+static void
+EnhancedCleanup()
+{
+	delete enhstate_gdiplus.font;
+	delete enhstate_gdiplus.stringformat;
+}
+
+
+static void
+draw_enhanced_init(LPGW lpgw, Graphics &graphics, SolidBrush &brush, LPRECT rect)
+{
+	enhstate.set_font = &EnhancedSetFont;
+	enhstate.text_length = &EnhancedTextLength;
+	enhstate.put_text = &EnhancedPutText;
+	enhstate.cleanup = &EnhancedCleanup;
+
+	enhstate_gdiplus.graphics = &graphics;
+	enhstate_gdiplus.font = SetFont_gdiplus(graphics, rect, lpgw, lpgw->fontname, lpgw->fontsize);
+	enhstate_gdiplus.brush = &brush;
+	enhstate.res_scale = graphics.GetDpiY() / 96.;
+
+	enhstate_gdiplus.stringformat = new StringFormat(StringFormat::GenericTypographic());
+	enhstate_gdiplus.stringformat->SetAlignment(StringAlignmentNear);
+	enhstate_gdiplus.stringformat->SetLineAlignment(StringAlignmentFar);
+	INT flags = enhstate_gdiplus.stringformat->GetFormatFlags();
+	flags |= StringFormatFlagsMeasureTrailingSpaces;
+	enhstate_gdiplus.stringformat->SetFormatFlags(flags);
+}
+
+
+void
 drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
+{
+	gdiplusInit();
+	Graphics graphics(hdc);
+	do_draw_gdiplus(lpgw, graphics, rect, DRAW_SCREEN);
+}
+
+
+void
+metafile_gdiplus(LPGW lpgw, HDC hdc, LPRECT lprect, LPWSTR name)
+{
+	gdiplusInit();
+	Rect rect(lprect->left, lprect->top, lprect->right - lprect->left, lprect->bottom - lprect->top);
+	Metafile metafile(name, hdc, rect, MetafileFrameUnitPixel, EmfTypeEmfPlusDual, NULL);
+	Graphics graphics(&metafile);
+	do_draw_gdiplus(lpgw, graphics, lprect, DRAW_METAFILE);
+}
+
+
+HENHMETAFILE
+clipboard_gdiplus(LPGW lpgw, HDC hdc, LPRECT lprect)
+{
+	gdiplusInit();
+	Rect rect(lprect->left, lprect->top, lprect->right - lprect->left, lprect->bottom - lprect->top);
+	Metafile metafile(hdc, rect, MetafileFrameUnitPixel, EmfTypeEmfPlusDual, NULL);
+	// Note: We can only get a valid handle once the graphics object has released
+	// the metafile. Creating the graphics object on the heap seems the only way to
+	// achieve that.
+	Graphics * graphics = Graphics::FromImage(&metafile);
+	do_draw_gdiplus(lpgw, *graphics, lprect, DRAW_METAFILE);
+	delete graphics;
+	return metafile.GetHENHMETAFILE();
+}
+
+
+void
+print_gdiplus(LPGW lpgw, HDC hdc, HANDLE printer, LPRECT rect)
+{
+	gdiplusInit();
+
+	// temporarily turn of antialiasing
+	BOOL aa = lpgw->antialiasing;
+	lpgw->antialiasing = FALSE;
+
+	Graphics graphics(hdc, printer);
+	graphics.SetPageUnit(UnitPixel);
+	do_draw_gdiplus(lpgw, graphics, rect, DRAW_PRINTER);
+
+	// restore settings
+	lpgw->antialiasing = aa;
+}
+
+
+static void
+do_draw_gdiplus(LPGW lpgw, Graphics &graphics, LPRECT rect, enum draw_target target)
 {
 	/* draw ops */
 	unsigned int ngwop = 0;
@@ -406,7 +473,7 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 	int hypertype = 0;
 
 	/* colors */
-	bool isColor;				/* use colors? */
+	bool isColor = true;		/* use colors? */
 	COLORREF last_color = 0;	/* currently selected color */
 	double alpha_c = 1.;		/* alpha for transparency */
 
@@ -414,18 +481,17 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 	Font * font;
 
 	/* lines */
-	double line_width = lpgw->sampling * lpgw->linewidth;	/* current line width */
+	double line_width = lpgw->linewidth;	/* current line width */
 	double lw_scale = 1.;
 	LOGPEN cur_penstruct;		/* current pen settings */
 
 	/* polylines and polygons */
 	int polymax = 200;			/* size of ppt */
 	int polyi = 0;				/* number of points in ppt */
-	POINT * ppt;				/* storage of polyline/polygon-points */
+	PointF * ppt;				/* storage of polyline/polygon-points */
 	int last_polyi = 0;			/* number of points in last_poly */
-	POINT * last_poly = NULL;	/* storage of last filled polygon */
+	PointF * last_poly = NULL;	/* storage of last filled polygon */
 	unsigned int lastop = -1;	/* used for plotting last point on a line */
-	POINT cpoint;				/* current GDI location */
 
 	/* filled polygons and boxes */
 	int last_fillstyle = -1;
@@ -434,6 +500,9 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 	bool transparent = false;	/* transparent fill? */
 	Brush * pattern_brush = NULL;
 	Brush * fill_brush = NULL;
+	Bitmap * poly_bitmap = NULL;
+	Graphics * poly_graphics = NULL;
+	float poly_scale = 2.f;
 
 	/* images */
 	POINT corners[4];			/* image corners */
@@ -451,16 +520,16 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 #endif
 
 	/* point symbols */
-	int last_symbol = 0;
+	enum win_pointtypes last_symbol = W_invalid_pointtype;
 	CachedBitmap *cb = NULL;
 	POINT cb_ofs;
 	bool ps_caching = false;
 
 	/* coordinates and lengths */
-	int xdash, ydash;			/* the transformed coordinates */
+	float xdash, ydash;			/* the transformed coordinates */
 	int rr, rl, rt, rb;			/* coordinates of drawing area */
 	int htic, vtic;				/* tic sizes */
-	int hshift, vshift;			/* correction of text position */
+	float hshift, vshift;			/* correction of text position */
 
 	/* indices */
 	int seq = 0;				/* sequence counter for W_image and W_boxedtext */
@@ -468,49 +537,32 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 	if (lpgw->locked) return;
 
 	/* clear hypertexts only in display sessions */
-	interactive = (GetObjectType(hdc) == OBJ_MEMDC) ||
-		((GetObjectType(hdc) == OBJ_DC) && (GetDeviceCaps(hdc, TECHNOLOGY) == DT_RASDISPLAY));
+	interactive = (target == DRAW_SCREEN);
 	if (interactive)
 		clear_tooltips(lpgw);
+
+	/* Need to scale line widths for raster printers so they are the same
+	   as on screen */
+	if (target == DRAW_PRINTER) {
+		HDC hdc = graphics.GetHDC();
+		HDC hdc_screen = GetDC(NULL);
+		lw_scale = (double) GetDeviceCaps(hdc, LOGPIXELSX) /
+		           (double) GetDeviceCaps(hdc_screen, LOGPIXELSY);
+		line_width *= lw_scale;
+		ReleaseDC(NULL, hdc_screen);
+		graphics.ReleaseHDC(hdc);
+	}
+
+	// only cache point symbols when drawing to a screen
+	ps_caching = (target == DRAW_SCREEN);
 
 	rr = rect->right;
 	rl = rect->left;
 	rt = rect->top;
 	rb = rect->bottom;
 
-	/* The GDI status query functions don't work on metafile, printer or
-	 * plotter handles, so can't know whether the screen is actually showing
-	 * color or not, if drawgraph() is being called from CopyClip().
-	 * Solve by defaulting isColor to TRUE in those cases.
-	 * Note that info on color capabilities of printers would be available
-	 * via DeviceCapabilities().
-	 */
-	isColor = (((GetDeviceCaps(hdc, PLANES) * GetDeviceCaps(hdc, BITSPIXEL)) > 2)
-	       || (GetDeviceCaps(hdc, TECHNOLOGY) == DT_METAFILE)
-	       || (GetDeviceCaps(hdc, TECHNOLOGY) == DT_PLOTTER)
-	       || (GetDeviceCaps(hdc, TECHNOLOGY) == DT_RASPRINTER));
-
-	/* Need to scale line widths for raster printers so they are the same
-	   as on screen */
-	if ((GetDeviceCaps(hdc, TECHNOLOGY) == DT_RASPRINTER)) {
-		HDC hdc_screen = GetDC(NULL);
-		lw_scale = (double) GetDeviceCaps(hdc, VERTRES) /
-		           (double) GetDeviceCaps(hdc_screen, VERTRES);
-		line_width *= lw_scale;
-		ReleaseDC(NULL, hdc_screen);
-	}
-
-	ps_caching = !((GetDeviceCaps(hdc, TECHNOLOGY) == DT_METAFILE)
-	            || (GetDeviceCaps(hdc, TECHNOLOGY) == DT_PLOTTER)
-	            || (GetDeviceCaps(hdc, TECHNOLOGY) == DT_RASPRINTER));
-
-	gdiplusInit();
-	Graphics graphics(hdc);
-
 	if (lpgw->antialiasing) {
-		graphics.SetSmoothingMode(SmoothingModeAntiAlias);
 		graphics.SetSmoothingMode(SmoothingModeAntiAlias8x8);
-		// graphics.SetTextRenderingHint(TextRenderingHintAntiAlias);
 		graphics.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
 	}
 	graphics.SetInterpolationMode(InterpolationModeNearestNeighbor);
@@ -540,21 +592,24 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 					DashCapFlat);
 	solid_pen.SetLineJoin(lpgw->rounded ? LineJoinRound : LineJoinMiter);
 
-	ppt = (POINT *) LocalAllocPtr(LHND, (polymax + 1) * sizeof(POINT));
+	ppt = (PointF *) malloc((polymax + 1) * sizeof(PointF));
 
 	htic = (lpgw->org_pointsize * MulDiv(lpgw->htic, rr - rl, lpgw->xmax) + 1);
 	vtic = (lpgw->org_pointsize * MulDiv(lpgw->vtic, rb - rt, lpgw->ymax) + 1);
 
 	lpgw->angle = 0;
 	lpgw->justify = LEFT;
-	StringFormat stringFormat;
+	StringFormat stringFormat(StringFormat::GenericTypographic());
 	stringFormat.SetAlignment(StringAlignmentNear);
 	stringFormat.SetLineAlignment(StringAlignmentNear);
+	INT flags = stringFormat.GetFormatFlags();
+	flags |= StringFormatFlagsMeasureTrailingSpaces;
+	stringFormat.SetFormatFlags(flags);
 	font = SetFont_gdiplus(graphics, rect, lpgw, NULL, 0);
 
 	/* calculate text shifting for horizontal text */
-	hshift = 0;
-	vshift = -MulDiv(lpgw->vchar, rb - rt, lpgw->ymax) / 2;
+	hshift = 0.0;
+	vshift = - lpgw->tmHeight / 2;
 
 	/* init layer variables */
 	lpgw->numplots = 0;
@@ -581,42 +636,32 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 		curptr = (struct GWOP *)blkptr->gwop;
 	}
 	if (curptr == NULL)
-	    return;
+		return;
 
 	while (ngwop < lpgw->nGWOP) {
-		/* transform the coordinates */
-		xdash = MulDiv(curptr->x, rr-rl-1, lpgw->xmax) + rl;
-		ydash = MulDiv(curptr->y, rt-rb+1, lpgw->ymax) + rb - 1;
-
-		/* ignore superfluous moves - see bug #1523 */
-		/* FIXME: we should do this in win.trm, not here */
-		if ((lastop == W_vect) && (curptr->op == W_move) && (xdash == ppt[polyi -1].x) && (ydash == ppt[polyi -1].y)) {
-		    curptr->op = 0;
-		}
-
-		/* finish last polygon / polyline */
-		if ((lastop == W_vect) && (curptr->op != W_vect) && (curptr->op != 0)) {
-			if (polyi >= 2) {
-				gdiplusPolyline(graphics, pen, ppt, polyi);
-				/* move internal state to last point */
-				cpoint = ppt[polyi - 1];
-			} else if (polyi == 1) {
-				/* degenerate case e.g. when using 'linecolor variable' */
-				graphics.DrawLine(&pen, (INT) cpoint.x, cpoint.y, ppt[0].x, ppt[0].y);
-				cpoint = ppt[0];
-			}
-			polyi = 0;
+		// transform the coordinates
+		if (lpgw->oversample) {
+			xdash = float(curptr->x) * (rr - rl - 1) / float(lpgw->xmax) + rl;
+			ydash = float(rb) - float(curptr->y) * (rb - rt - 1) / float(lpgw->ymax) + rt - 1;
+		} else {
+			xdash = MulDiv(curptr->x, rr - rl - 1, lpgw->xmax) + rl;
+			ydash = rb - MulDiv(curptr->y, rb - rt - 1, lpgw->ymax) + rt - 1;
 		}
 
 		/* finish last filled polygon */
 		if ((last_poly != NULL) &&
 			(((lastop == W_filled_polygon_draw) && (curptr->op != W_fillstyle)) ||
 			 ((curptr->op == W_fillstyle) && (curptr->x != unsigned(last_fillstyle))))) {
-			SmoothingMode mode = graphics.GetSmoothingMode();
-			if (lpgw->antialiasing && !lpgw->polyaa)
-				graphics.SetSmoothingMode(SmoothingModeNone);
-			gdiplusFilledPolygon(graphics, *fill_brush, last_poly, last_polyi);
-			graphics.SetSmoothingMode(mode);
+			if (poly_graphics == NULL) {
+				// changing smoothing mode is necessary in case of new/unknown code paths
+				SmoothingMode mode = graphics.GetSmoothingMode();
+				if (lpgw->antialiasing && !lpgw->polyaa)
+					graphics.SetSmoothingMode(SmoothingModeNone);
+				graphics.FillPolygon(fill_brush, last_poly, last_polyi);
+				graphics.SetSmoothingMode(mode);
+			} else {
+				poly_graphics->FillPolygon(fill_brush, last_poly, last_polyi);
+			}
 			last_polyi = 0;
 			free(last_poly);
 			last_poly = NULL;
@@ -637,7 +682,7 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 							lpgw->hideplot[idx] = FALSE;
 					}
 					if (plotno <= lpgw->maxhideplots)
-						skipplot = (lpgw->hideplot[plotno - 1] == TRUE);
+						skipplot = (lpgw->hideplot[plotno - 1] > 0);
 					break;
 				case TERM_LAYER_AFTER_PLOT:
 					skipplot = false;
@@ -675,14 +720,39 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 					plotno = 0;
 					break;
 				case TERM_LAYER_BEGIN_PM3D_MAP:
+				case TERM_LAYER_BEGIN_PM3D_FLUSH:
+					// Antialiasing of pm3d polygons is obtained by drawing to a
+					// bitmap four times as large and copying it back with interpolation
+					if (lpgw->antialiasing && lpgw->polyaa) {
+						poly_bitmap = new Bitmap(poly_scale * (rr - rl), poly_scale * (rb - rt), &graphics);
+						poly_graphics = Graphics::FromImage(poly_bitmap);
+						poly_graphics->SetSmoothingMode(SmoothingModeNone);
+						Matrix transform(poly_scale, 0.0f, 0.0f, poly_scale, 0.0f, 0.0f);
+						poly_graphics->SetTransform(&transform);
+					}
+					break;
+				case TERM_LAYER_END_PM3D_MAP:
+				case TERM_LAYER_END_PM3D_FLUSH:
+					if (poly_graphics != NULL) {
+						delete poly_graphics;
+						poly_graphics = NULL;
+						graphics.SetInterpolationMode(InterpolationModeHighQualityBilinear);
+						graphics.SetPixelOffsetMode(PixelOffsetModeHighQuality);
+						graphics.DrawImage(poly_bitmap, 0, 0, rr - rl, rb - rt);
+						graphics.SetInterpolationMode(InterpolationModeNearestNeighbor);
+						graphics.SetPixelOffsetMode(PixelOffsetModeNone);
+						delete poly_bitmap;
+					}
+					break;
 				case TERM_LAYER_BEGIN_IMAGE:
-					// antialiasing is not supported properly for pm3d polygons
-					// and failsafe images
+				case TERM_LAYER_BEGIN_COLORBOX:
+					// Turn of antialiasing for failsafe/pixel images and color boxes
+					// to avoid seams.
 					if (lpgw->antialiasing)
 						graphics.SetSmoothingMode(SmoothingModeNone);
 					break;
-				case TERM_LAYER_END_PM3D_MAP:
 				case TERM_LAYER_END_IMAGE:
+				case TERM_LAYER_END_COLORBOX:
 					if (lpgw->antialiasing)
 						graphics.SetSmoothingMode(SmoothingModeAntiAlias8x8);
 					break;
@@ -702,10 +772,10 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			/* point symbols */
 			if ((curptr->op >= W_dot) && (curptr->op <= W_dot + WIN_POINT_TYPES)) {
 				RECT rect;
-				rect.left = xdash - htic;
-				rect.right = xdash + htic;
-				rect.top = ydash - vtic;
-				rect.bottom = ydash + vtic;
+				rect.left = xdash - htic - 0.5;
+				rect.right = xdash + htic + 0.5;
+				rect.top = ydash - vtic - 0.5;
+				rect.bottom = ydash + vtic + 0.5;
 				add_tooltip(lpgw, &rect, hypertext);
 				hypertext = NULL;
 			}
@@ -718,28 +788,32 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 		case W_layer: /* already handled above */
 			break;
 
-		case W_move:
-			ppt[0].x = xdash;
-			ppt[0].y = ydash;
-			polyi = 1;
-			if (keysample)
-				draw_update_keybox(lpgw, plotno, xdash, ydash);
-			break;
-
-		case W_vect:
-			ppt[polyi].x = xdash;
-			ppt[polyi].y = ydash;
-			polyi++;
-			if (polyi >= polymax) {
-				gdiplusPolyline(graphics, pen, ppt, polyi);
-				ppt[0].x = xdash;
-				ppt[0].y = ydash;
-				polyi = 1;
-				cpoint = ppt[0];
+		case W_polyline: {
+			POINTL * poly = (POINTL *) LocalLock(curptr->htext);
+			polyi = curptr->x;
+			PointF * points = new PointF[polyi];
+			for (int i = 0; i < polyi; i++) {
+				// transform the coordinates
+				if (lpgw->oversample) {
+					points[i].X = float(poly[i].x) * (rr - rl - 1) / float(lpgw->xmax) + rl;
+					points[i].Y = float(rb) - float(poly[i].y) * (rb - rt - 1) / float(lpgw->ymax) + rt - 1;
+				} else {
+					points[i].X = MulDiv(poly[i].x, rr - rl - 1, lpgw->xmax) + rl;
+					points[i].Y = rb - MulDiv(poly[i].y, rb - rt - 1, lpgw->ymax) + rt - 1;
+				}
 			}
-			if (keysample)
-				draw_update_keybox(lpgw, plotno, xdash, ydash);
+			LocalUnlock(poly);
+			if (poly_graphics == NULL)
+				gdiplusPolyline(graphics, pen, points, polyi);
+			else
+				gdiplusPolyline(*poly_graphics, pen, points, polyi);
+			if (keysample) {
+				draw_update_keybox(lpgw, plotno, points[0].X, points[0].Y);
+				draw_update_keybox(lpgw, plotno, points[polyi - 1].X, points[polyi - 1].Y);
+			}
+			delete [] points;
 			break;
+		}
 
 		case W_line_type: {
 			int cur_pen = (int)curptr->x % WGNUMPENS;
@@ -779,8 +853,8 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			pen.SetColor(color);
 			pen.SetWidth(cur_penstruct.lopnWidth.x);
 			if (cur_penstruct.lopnStyle <= PS_DASHDOTDOT)
-				// cast is save since GDI and GDI+ use the same numbers
-				pen.SetDashStyle(static_cast<DashStyle>(cur_penstruct.lopnStyle));
+				// cast is safe since GDI and GDI+ use the same numbers
+				gdiplusSetDashStyle(&pen, static_cast<DashStyle>(cur_penstruct.lopnStyle));
 			else
 				pen.SetDashStyle(DashStyleSolid);
 
@@ -797,15 +871,15 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 				dt %= WGNUMPENS;
 				dt += 2;
 				cur_penstruct.lopnStyle = lpgw->monopen[dt].lopnStyle;
-				pen.SetDashStyle(static_cast<DashStyle>(cur_penstruct.lopnStyle));
+				gdiplusSetDashStyle(&pen, static_cast<DashStyle>(cur_penstruct.lopnStyle));
 			} else if (dt == DASHTYPE_SOLID) {
 				cur_penstruct.lopnStyle = PS_SOLID;
-				pen.SetDashStyle(static_cast<DashStyle>(cur_penstruct.lopnStyle));
+				gdiplusSetDashStyle(&pen, static_cast<DashStyle>(cur_penstruct.lopnStyle));
 			} else if (dt == DASHTYPE_AXIS) {
 				dt = 1;
 				cur_penstruct.lopnStyle =
 					lpgw->dashed ? lpgw->monopen[dt].lopnStyle : lpgw->colorpen[dt].lopnStyle;
-				pen.SetDashStyle(static_cast<DashStyle>(cur_penstruct.lopnStyle));
+				gdiplusSetDashStyle(&pen, static_cast<DashStyle>(cur_penstruct.lopnStyle));
 			} else if (dt == DASHTYPE_CUSTOM) {
 				t_dashtype * dash = static_cast<t_dashtype *>(LocalLock(curptr->htext));
 				INT count = 0;
@@ -838,15 +912,21 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 					}
 					RectF size;
 					int dxl, dxr;
-					graphics.MeasureString(textw, -1, font, PointF(0,0), &size);
-					if (lpgw->justify == LEFT) {
-						dxl = 0;
-						dxr = size.Width;
-					} else if (lpgw->justify == CENTRE) {
-						dxl = dxr = size.Width / 2;
-					} else {
-						dxl = size.Width;
-						dxr = 0;
+#ifndef EAM_BOXED_TEXT
+					if (keysample) {
+#else
+					if (keysample || boxedtext.boxing) {
+#endif
+						graphics.MeasureString(textw, -1, font, PointF(0,0), &stringFormat, &size);
+						if (lpgw->justify == LEFT) {
+							dxl = 0;
+							dxr = size.Width + 0.5;
+						} else if (lpgw->justify == CENTRE) {
+							dxl = dxr = size.Width / 2;
+						} else {
+							dxl = size.Width + 0.5;
+							dxr = 0;
+						}
 					}
 					if (keysample) {
 						draw_update_keybox(lpgw, plotno, xdash - dxl, ydash - size.Height / 2);
@@ -874,25 +954,13 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 		}
 
 		case W_enhanced_text: {
-			/* TODO: This section still uses GDI. Convert to GDI+. */
-			HDC hdc = graphics.GetHDC();
-			char * str;
-			str = (char *) LocalLock(curptr->htext);
+			char * str = (char *) LocalLock(curptr->htext);
 			if (str) {
 				RECT extend;
-
-				/* Setup GDI fonts: force re-make */
-				int save_fontsize = lpgw->fontsize;
-				lpgw->fontsize = -1;
-				GraphChangeFont(lpgw, lpgw->fontname, save_fontsize, hdc, *rect);
-				SetFont(lpgw, hdc);
-				lpgw->fontsize = save_fontsize;
-
-				/* Set GDI text color */
-				SetTextColor(hdc, last_color);
-
-				draw_enhanced_text(lpgw, hdc, rect, xdash, ydash, str);
+				draw_enhanced_init(lpgw, graphics, solid_brush, rect);
+				draw_enhanced_text(lpgw, rect, xdash, ydash, str);
 				draw_get_enhanced_text_extend(&extend);
+
 				if (keysample) {
 					draw_update_keybox(lpgw, plotno, xdash - extend.left, ydash - extend.top);
 					draw_update_keybox(lpgw, plotno, xdash + extend.right, ydash + extend.bottom);
@@ -913,7 +981,6 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 #endif
 			}
 			LocalUnlock(curptr->htext);
-			graphics.ReleaseHDC(hdc);
 			break;
 		}
 
@@ -989,49 +1056,43 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 					}
 					rect.Offset(boxedtext.start.x, boxedtext.start.y);
 					if (boxedtext.option == TEXTBOX_OUTLINE) {
-						/* FIXME: Shouldn't we use the current color brush lpgw->hcolorbrush? */
-						Pen * pen = gdiplusCreatePen(PS_SOLID, line_width, RGB(0,0,0), 1.);
-						graphics.DrawRectangle(pen, rect);
-						delete pen;
+						graphics.DrawRectangle(&pen, rect);
 					} else {
-						/* Fill bounding box with background color. */
-						SolidBrush brush(gdiplusCreateColor(lpgw->background, 1.));
-						graphics.FillRectangle(&brush, rect);
+						/* Fill bounding box with current color. */
+						graphics.FillRectangle(&solid_brush, rect);
 					}
 				} else {
-					double theta = boxedtext.angle * M_PI/180.;
-					double sin_theta = sin(theta);
-					double cos_theta = cos(theta);
-					POINT  rect[5];
+					float theta = boxedtext.angle * M_PI / 180.;
+					float sin_theta = sin(theta);
+					float cos_theta = cos(theta);
+					PointF rect[5];
 
-					rect[0].x =  (boxedtext.box.left   - dx) * cos_theta +
+					rect[0].X =  (boxedtext.box.left   - dx) * cos_theta +
 								 (boxedtext.box.top    - dy) * sin_theta;
-					rect[0].y = -(boxedtext.box.left   - dx) * sin_theta +
+					rect[0].Y = -(boxedtext.box.left   - dx) * sin_theta +
 								 (boxedtext.box.top    - dy) * cos_theta;
-					rect[1].x =  (boxedtext.box.left   - dx) * cos_theta +
+					rect[1].X =  (boxedtext.box.left   - dx) * cos_theta +
 								 (boxedtext.box.bottom + dy) * sin_theta;
-					rect[1].y = -(boxedtext.box.left   - dx) * sin_theta +
+					rect[1].Y = -(boxedtext.box.left   - dx) * sin_theta +
 								 (boxedtext.box.bottom + dy) * cos_theta;
-					rect[2].x =  (boxedtext.box.right  + dx) * cos_theta +
+					rect[2].X =  (boxedtext.box.right  + dx) * cos_theta +
 								 (boxedtext.box.bottom + dy) * sin_theta;
-					rect[2].y = -(boxedtext.box.right  + dx) * sin_theta +
+					rect[2].Y = -(boxedtext.box.right  + dx) * sin_theta +
 								 (boxedtext.box.bottom + dy) * cos_theta;
-					rect[3].x =  (boxedtext.box.right  + dx) * cos_theta +
+					rect[3].X =  (boxedtext.box.right  + dx) * cos_theta +
 								 (boxedtext.box.top    - dy) * sin_theta;
-					rect[3].y = -(boxedtext.box.right  + dx) * sin_theta +
+					rect[3].Y = -(boxedtext.box.right  + dx) * sin_theta +
 								 (boxedtext.box.top    - dy) * cos_theta;
 					for (int i = 0; i < 4; i++) {
-						rect[i].x += boxedtext.start.x;
-						rect[i].y += boxedtext.start.y;
+						rect[i].X += boxedtext.start.x;
+						rect[i].Y += boxedtext.start.y;
 					}
 					if (boxedtext.option == TEXTBOX_OUTLINE) {
-						rect[4].x = rect[0].x;
-						rect[4].y = rect[0].y;
-						Pen * pen = gdiplusCreatePen(PS_SOLID, line_width, RGB(0,0,0), 1.);
-						gdiplusPolyline(graphics, *pen, rect, 5);
-						delete pen;
+						rect[4].X = rect[0].X;
+						rect[4].Y = rect[0].Y;
+						gdiplusPolyline(graphics, pen, rect, 5);
 					} else {
-						gdiplusSolidFilledPolygonEx(hdc, rect, 4, lpgw->background, 1., TRUE);
+						graphics.FillPolygon(fill_brush, rect, 4);
 					}
 				}
 				boxedtext.boxing = FALSE;
@@ -1039,8 +1100,8 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			}
 			case TEXTBOX_MARGINS:
 				/* Adjust size of whitespace around text: default is 1/2 char height + 2 char widths. */
-				boxedtext.margin.x = MulDiv(curptr->y, (rr - rl) * lpgw->hchar, 100 * lpgw->xmax);
-				boxedtext.margin.y = MulDiv(curptr->y, (rb - rt) * lpgw->vchar, 400 * lpgw->ymax);
+				boxedtext.margin.x = MulDiv(curptr->x * lpgw->hchar, rr - rl, 1000 * lpgw->xmax);
+				boxedtext.margin.y = MulDiv(curptr->y * lpgw->hchar, rr - rl, 1000 * lpgw->xmax);
 				break;
 			default:
 				break;
@@ -1053,6 +1114,7 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			 * parameters of a filled box call through the bottleneck
 			 * of the fixed number of parameters in GraphOp() and
 			 * struct GWOP, respectively. */
+			/* FIXME: resetting polyi here should not be necessary */
 			polyi = 0; /* start new sequence */
 			int fillstyle = curptr->x;
 
@@ -1094,7 +1156,8 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 					/* style == 2 --> use fill pattern according to
 							 * fillpattern. Pattern number is enumerated */
 					int pattern = GPMAX(fillstyle >> 4, 0) % pattern_num;
-					if (pattern_brush) delete pattern_brush;
+					if (pattern_brush)
+						delete pattern_brush;
 					pattern_brush = gdiplusPatternBrush(pattern,
 									last_color, 1., lpgw->background, transparent);
 					fill_brush = pattern_brush;
@@ -1119,22 +1182,31 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			break;
 		}
 
+		case W_move:
+			// This is used for filled boxes only.
+			ppt[0].X = xdash;
+			ppt[0].Y = ydash;
+			break;
+
 		case W_boxfill: {
 			/* NOTE: the x and y passed with this call are the coordinates of the
 			 * lower right corner of the box. The upper left corner was stored into
 			 * ppt[0] by a preceding W_move, and the style was set
 			 * by a W_fillstyle call. */
-			POINT p;
-			UINT  height, width;
+			// snap to pixel grid
+			Point p1(xdash + 0.5, ydash + 0.5);
+			Point p2(ppt[0].X + 0.5, ppt[0].Y + 0.5);
+			Point p;
+			int height, width;
 
-			p.x = GPMIN(ppt[0].x, xdash);
-			p.y = GPMIN(ppt[0].y, ydash);
-			width = abs(xdash - ppt[0].x);
-			height = abs(ppt[0].y - ydash);
+			p.X = GPMIN(p1.X, p2.X);
+			p.Y = GPMIN(p1.Y, p2.Y);
+			width = abs(p2.X - p1.X);
+			height = abs(p1.Y - p2.Y);
 
 			SmoothingMode mode = graphics.GetSmoothingMode();
 			graphics.SetSmoothingMode(SmoothingModeNone);
-			graphics.FillRectangle(fill_brush, (INT) p.x, p.y, width, height);
+			graphics.FillRectangle(fill_brush, p.X, p.Y, width, height);
 			graphics.SetSmoothingMode(mode);
 			if (keysample)
 				draw_update_keybox(lpgw, plotno, xdash + 1, ydash);
@@ -1146,8 +1218,15 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			if (lpgw->angle != (int)curptr->x) {
 				lpgw->angle = (int)curptr->x;
 				/* recalculate shifting of rotated text */
-				hshift = - sin(M_PI/180. * lpgw->angle) * MulDiv(lpgw->vchar, rr-rl, lpgw->xmax) / 2;
-				vshift = - cos(M_PI/180. * lpgw->angle) * MulDiv(lpgw->vchar, rb-rt, lpgw->ymax) / 2;
+				hshift = - sin(M_PI / 180. * lpgw->angle) * lpgw->tmHeight / 2.;
+				vshift = - cos(M_PI / 180. * lpgw->angle) * lpgw->tmHeight / 2.;
+				if (lpgw->antialiasing) {
+					// Cleartype is only applied to non-rotated text
+					if ((lpgw->angle % 180) != 0)
+						graphics.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+					else
+						graphics.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
+				}
 			}
 			break;
 
@@ -1170,24 +1249,31 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			int size = curptr->x;
 			char * fontname = (char *) LocalLock(curptr->htext);
 			delete font;
+#ifdef UNICODE
+			/* FIXME: Maybe this should be in win.trm instead. */
+			LPWSTR wfontname = UnicodeText(fontname, lpgw->encoding);
+			font = SetFont_gdiplus(graphics, rect, lpgw, wfontname, size);
+			free(wfontname);
+#else
 			font = SetFont_gdiplus(graphics, rect, lpgw, fontname, size);
+#endif
 			LocalUnlock(curptr->htext);
 			/* recalculate shifting of rotated text */
-			hshift = - sin(M_PI/180. * lpgw->angle) * MulDiv(lpgw->vchar, rr-rl, lpgw->xmax) / 2;
-			vshift = - cos(M_PI/180. * lpgw->angle) * MulDiv(lpgw->vchar, rb-rt, lpgw->ymax) / 2;
+			hshift = - sin(M_PI / 180. * lpgw->angle) * lpgw->tmHeight / 2.;
+			vshift = - cos(M_PI / 180. * lpgw->angle) * lpgw->tmHeight / 2.;
 			break;
 		}
 
 		case W_pointsize:
 			if (curptr->x > 0) {
 				double pointsize = curptr->x / 100.0;
-				htic = pointsize * MulDiv(lpgw->htic, rr-rl, lpgw->xmax) + 1;
-				vtic = pointsize * MulDiv(lpgw->vtic, rb-rt, lpgw->ymax) + 1;
+				htic = MulDiv(pointsize * lpgw->pointscale * lpgw->htic, rr - rl, lpgw->xmax) + 1;
+				vtic = MulDiv(pointsize * lpgw->pointscale * lpgw->vtic, rb - rt, lpgw->ymax) + 1;
 			} else {
 				htic = vtic = 0;
 			}
 			/* invalidate point symbol cache */
-			last_symbol = 0;
+			last_symbol = W_invalid_pointtype;
 			break;
 
 		case W_line_width:
@@ -1195,11 +1281,13 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			 * that linewidth is exactly 1 iff it's in default
 			 * state */
 			line_width = curptr->x == 100 ? 1 : (curptr->x / 100.0);
-			line_width *= lpgw->sampling * lpgw->linewidth * lw_scale;
+			line_width *= lpgw->linewidth * lw_scale;
+			if (poly_graphics != NULL)
+				line_width *= poly_scale;
 			solid_pen.SetWidth(line_width);
 			pen.SetWidth(line_width);
 			/* invalidate point symbol cache */
-			last_symbol = 0;
+			last_symbol = W_invalid_pointtype;
 			break;
 
 		case W_setcolor: {
@@ -1239,7 +1327,7 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 
 			/* invalidate point symbol cache */
 			if (last_color != color)
-				last_symbol = 0;
+				last_symbol = W_invalid_pointtype;
 
 			/* remember this color */
 			cur_penstruct.lopnColor = color;
@@ -1251,10 +1339,10 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			/* a point of the polygon is coming */
 			if (polyi >= polymax) {
 				polymax += 200;
-				ppt = (POINT *) LocalReAllocPtr(ppt, LHND, (polymax + 1) * sizeof(POINT));
+				ppt = (PointF *) realloc(ppt, (polymax + 1) * sizeof(PointF));
 			}
-			ppt[polyi].x = xdash;
-			ppt[polyi].y = ydash;
+			ppt[polyi].X = xdash;
+			ppt[polyi].Y = ydash;
 			polyi++;
 			break;
 		}
@@ -1262,25 +1350,25 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 		case W_filled_polygon_draw: {
 			bool found = false;
 			int i, k;
-			bool same_rot = true;
+			//bool same_rot = true;
 
 			// Test if successive polygons share a common edge:
 			if ((last_poly != NULL) && (polyi > 2)) {
 				// Check for a common edge with previous filled polygon.
 				for (i = 0; (i < polyi) && !found; i++) {
 					for (k = 0; (k < last_polyi) && !found; k++) {
-						if ((ppt[i].x == last_poly[k].x) && (ppt[i].y == last_poly[k].y)) {
-							if ((ppt[(i + 1) % polyi].x == last_poly[(k + 1) % last_polyi].x) &&
-							    (ppt[(i + 1) % polyi].y == last_poly[(k + 1) % last_polyi].y)) {
+						if ((ppt[i].X == last_poly[k].X) && (ppt[i].Y == last_poly[k].Y)) {
+							if ((ppt[(i + 1) % polyi].X == last_poly[(k + 1) % last_polyi].X) &&
+							    (ppt[(i + 1) % polyi].Y == last_poly[(k + 1) % last_polyi].Y)) {
 								//found = true;
-								same_rot = true;
+								//same_rot = true;
 							}
 							// This is the dominant case for filling between curves,
 							// see fillbetween.dem and polar.dem.
-							if ((ppt[(i + 1) % polyi].x == last_poly[(k + last_polyi - 1) % last_polyi].x) &&
-							    (ppt[(i + 1) % polyi].y == last_poly[(k + last_polyi - 1) % last_polyi].y)) {
+							if ((ppt[(i + 1) % polyi].X == last_poly[(k + last_polyi - 1) % last_polyi].X) &&
+							    (ppt[(i + 1) % polyi].Y == last_poly[(k + last_polyi - 1) % last_polyi].Y)) {
 								found = true;
-								same_rot = false;
+								//same_rot = false;
 							}
 						}
 					}
@@ -1293,30 +1381,35 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 
 				int extra = polyi - 2;
 				// extend buffer to make room for extra points
-				last_poly = (POINT *) realloc(last_poly, (last_polyi + extra + 1) * sizeof(POINT));
+				last_poly = (PointF *) realloc(last_poly, (last_polyi + extra + 1) * sizeof(PointF));
 				/* TODO: should use memmove instead */
 				for (int n = last_polyi - 1; n >= k; n--) {
-					last_poly[n + extra].x = last_poly[n].x;
-					last_poly[n + extra].y = last_poly[n].y;
+					last_poly[n + extra].X = last_poly[n].X;
+					last_poly[n + extra].Y = last_poly[n].Y;
 				}
 				// copy new points
 				for (int n = 0; n < extra; n++) {
-					last_poly[k + n].x = ppt[(i + 2 + n) % polyi].x;
-					last_poly[k + n].y = ppt[(i + 2 + n) % polyi].y;
+					last_poly[k + n].X = ppt[(i + 2 + n) % polyi].X;
+					last_poly[k + n].Y = ppt[(i + 2 + n) % polyi].Y;
 				}
 				last_polyi += extra;
 			} else {
 				if (last_poly != NULL) {
-					SmoothingMode mode = graphics.GetSmoothingMode();
-					if (lpgw->antialiasing && !lpgw->polyaa)
-						graphics.SetSmoothingMode(SmoothingModeNone);
-					gdiplusFilledPolygon(graphics, *fill_brush, last_poly, last_polyi);
-					graphics.SetSmoothingMode(mode);
+					if (poly_graphics == NULL) {
+						// changing smoothing mode is still necessary in case of new/unknown code paths
+						SmoothingMode mode = graphics.GetSmoothingMode();
+						if (lpgw->antialiasing && !lpgw->polyaa)
+							graphics.SetSmoothingMode(SmoothingModeNone);
+						graphics.FillPolygon(fill_brush, last_poly, last_polyi);
+						graphics.SetSmoothingMode(mode);
+					} else {
+						poly_graphics->FillPolygon(fill_brush, last_poly, last_polyi);
+					}
 					free(last_poly);
 				}
 				// save the current polygon
-				last_poly = (POINT *) malloc(sizeof(POINT) * (polyi + 1));
-				memcpy(last_poly, ppt, sizeof(POINT) * (polyi + 1));
+				last_poly = (PointF *) malloc(sizeof(PointF) * (polyi + 1));
+				memcpy(last_poly, ppt, sizeof(PointF) * (polyi + 1));
 				last_polyi = polyi;
 			}
 
@@ -1331,31 +1424,22 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 				color_mode = curptr->x;
 			} else if (seq < 5) {
 				/* Next four OPs contain the `corner` array */
-				corners[seq - 1].x = xdash;
-				corners[seq - 1].y = ydash;
+				corners[seq - 1].x = xdash + 0.5;
+				corners[seq - 1].y = ydash + 0.5;
 			} else {
 				/* The last OP contains the image and it's size */
 				char * image = (char *) LocalLock(curptr->htext);
 				unsigned int width = curptr->x;
 				unsigned int height = curptr->y;
-#ifndef USE_GDIP_IMAGES
-		 		HDC hdc = graphics.GetHDC(); /* switch back to GDI */
-				draw_image(lpgw, hdc, image, corners, width, height, color_mode);
-				graphics.ReleaseHDC(hdc); /* switch back to GDI+ */
-#else
 				if (image) {
 					Bitmap * bitmap;
 
-					/* With GDI+ interpolation of images cannot be avoided.
-					Try to keep it simple at least: */
-					graphics.SetInterpolationMode(InterpolationModeBilinear);
-					SmoothingMode mode = graphics.GetSmoothingMode();
-					graphics.SetSmoothingMode(SmoothingModeNone);
+					graphics.SetPixelOffsetMode(PixelOffsetModeHighQuality);
 
 					/* create clip region */
 					Rect clipRect(
-						GPMIN(corners[2].x, corners[3].x), GPMIN(corners[2].y, corners[3].y),
-						GPMAX(corners[2].x, corners[3].x) + 1, GPMAX(corners[2].y, corners[3].y) + 1);
+						(INT) GPMIN(corners[2].x, corners[3].x), (INT) GPMIN(corners[2].y, corners[3].y),
+						abs(corners[2].x - corners[3].x), abs(corners[2].y - corners[3].y));
 					graphics.SetClip(clipRect);
 
 					if (color_mode != IC_RGBA) {
@@ -1397,9 +1481,8 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 						delete bitmap;
 					}
 					graphics.ResetClip();
-					graphics.SetSmoothingMode(mode);
+					graphics.SetPixelOffsetMode(PixelOffsetModeNone);
 				}
-#endif
 				LocalUnlock(curptr->htext);
 			}
 			seq = (seq + 1) % 6;
@@ -1407,14 +1490,20 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 		}
 
 		default: {
+			enum win_pointtypes symbol = (enum win_pointtypes) curptr->op;
+
 			/* This covers only point symbols. All other codes should be
 			   handled in the switch statement. */
-			if ((curptr->op < W_dot) || (curptr->op > W_dot + WIN_POINT_TYPES))
+			if ((symbol < W_dot) || (symbol > W_last_pointtype))
 				break;
 
 			// draw cached point symbol
-			if ((last_symbol == curptr->op) && (cb != NULL)) {
-				graphics.DrawCachedBitmap(cb, xdash - cb_ofs.x, ydash - cb_ofs.y);
+			if (ps_caching && (last_symbol == symbol) && (cb != NULL)) {
+				// always draw point symbols on integer (pixel) positions
+				if (lpgw->oversample)
+					graphics.DrawCachedBitmap(cb, INT(xdash + 0.5) - cb_ofs.x, INT(ydash + 0.5) - cb_ofs.y);
+				else
+					graphics.DrawCachedBitmap(cb, xdash - cb_ofs.x, ydash - cb_ofs.y);
 				break;
 			} else {
 				if (cb != NULL) {
@@ -1431,20 +1520,26 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			// Switch between cached and direct drawing
 			if (ps_caching) {
 				// Create a compatible bitmap
-				b = new Bitmap(2*htic+3, 2*vtic+3);
+				b = new Bitmap(2 * htic + 3, 2 * vtic + 3, &graphics);
 				g = Graphics::FromImage(b);
 				if (lpgw->antialiasing)
 					g->SetSmoothingMode(SmoothingModeAntiAlias8x8);
-				cb_ofs.x = xofs = htic+1;
-				cb_ofs.y = yofs = vtic+1;
-				last_symbol = curptr->op;
+				cb_ofs.x = xofs = htic + 1;
+				cb_ofs.y = yofs = vtic + 1;
+				last_symbol = symbol;
 			} else {
 				g = &graphics;
-				xofs = xdash;
-				yofs = ydash;
+				// snap to pixel
+				if (lpgw->oversample) {
+					xofs = xdash + 0.5;
+					yofs = ydash + 0.5;
+				} else {
+					xofs = xdash;
+					yofs = ydash;
+				}
 			}
 
-			switch (curptr->op) {
+			switch (symbol) {
 			case W_dot:
 				gdiplusDot(*g, solid_brush, xofs, yofs);
 				break;
@@ -1452,7 +1547,8 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			case W_star: /* do star: first plus, then cross */
 				g->DrawLine(&solid_pen, xofs - htic, yofs, xofs + htic, yofs);
 				g->DrawLine(&solid_pen, xofs, yofs - vtic, xofs, yofs + vtic);
-				if (curptr->op == W_plus) break;
+				if (symbol == W_plus)
+					break;
 			case W_cross: /* do X */
 				g->DrawLine(&solid_pen, xofs - htic, yofs - vtic, xofs + htic - 1, yofs + vtic);
 				g->DrawLine(&solid_pen, xofs - htic, yofs + vtic, xofs + htic - 1, yofs - vtic);
@@ -1464,7 +1560,7 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 				g->FillEllipse(&solid_brush, xofs - htic, yofs - htic, 2 * htic, 2 * htic);
 				break;
 			default: {	/* potentially closed figure */
-				POINT p[6];
+				Point p[6];
 				int i;
 				int shape = 0;
 				int filled = 0;
@@ -1483,12 +1579,12 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 
 				// This should never happen since all other codes should be
 				// handled in the switch statement.
-				if ((curptr->op < W_box) || (curptr->op > W_fpentagon))
+				if ((symbol < W_box) || (symbol > W_last_pointtype))
 					break;
 
 				// Calculate index, instead of an ugly long switch statement;
 				// Depends on definition of commands in wgnuplib.h.
-				index = (curptr->op - W_box);
+				index = (symbol - W_box);
 				shape = index / 2;
 				filled = (index % 2) > 0;
 
@@ -1496,16 +1592,16 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 					if (pointshapes[shape][i * 2 + 1] == 0
 						&& pointshapes[shape][i * 2] == 0)
 						break;
-					p[i].x = xofs + htic * pointshapes[shape][i * 2] + 0.5;
-					p[i].y = yofs + vtic * pointshapes[shape][i * 2 + 1] + 0.5;
+					p[i].X = xofs + htic * pointshapes[shape][i * 2] + 0.5;
+					p[i].Y = yofs + vtic * pointshapes[shape][i * 2 + 1] + 0.5;
 				}
 				if (filled) {
 					/* filled polygon with border */
-					gdiplusFilledPolygon(*g, solid_brush, p, i);
+					g->FillPolygon(&solid_brush, p, i);
 				} else {
 					/* Outline polygon */
-					p[i].x = p[0].x;
-					p[i].y = p[0].y;
+					p[i].X = p[0].X;
+					p[i].Y = p[0].Y;
 					gdiplusPolyline(*g, solid_pen, p, i + 1);
 					gdiplusDot(*g, solid_brush, xofs, yofs);
 				}
@@ -1513,10 +1609,13 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 			} /* switch (point symbol) */
 
 			if (b != NULL) {
-				// create a chached bitmap for faster redrawing
+				// create a cached bitmap for faster redrawing
 				cb = new CachedBitmap(b, &graphics);
-				// display bitmap
-				graphics.DrawCachedBitmap(cb, xdash - xofs, ydash - yofs);
+				// display point symbol snapped to pixel
+				if (lpgw->oversample)
+					graphics.DrawCachedBitmap(cb, INT(xdash + 0.5) - xofs, INT(ydash + 0.5) - yofs);
+				else
+					graphics.DrawCachedBitmap(cb, xdash - xofs, ydash - yofs);
 				delete b;
 				delete g;
 			}
@@ -1547,10 +1646,8 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 				break;
 			curptr = (struct GWOP *)blkptr->gwop;
 		}
-	}
-	if (polyi >= 2) {
-		gdiplusPolyline(graphics, pen, ppt, polyi);
-	}
+	} /* while (ngwop < lpgw->nGWOP) */
+
 	/* clean-up */
 	if (pattern_brush)
 		delete pattern_brush;
@@ -1558,5 +1655,143 @@ drawgraph_gdiplus(LPGW lpgw, HDC hdc, LPRECT rect)
 		delete cb;
 	if (font)
 		delete font;
-	LocalFreePtr(ppt);
+	free(ppt);
+}
+
+
+UINT nImageCodecs = 0; // number of image encoders
+ImageCodecInfo * pImageCodecInfo = NULL;  // list of image encoders
+
+
+static int
+gdiplusGetEncoders()
+{
+	UINT num = 0;
+	UINT size = 0;
+
+	GetImageEncodersSize(&nImageCodecs, &size);
+	if (size == 0)
+		return -1;
+	pImageCodecInfo = (ImageCodecInfo *) malloc(size);
+	if (pImageCodecInfo == NULL)
+		return -1;
+	GetImageEncoders(nImageCodecs, size, pImageCodecInfo);
+	return num;
+}
+
+
+void
+SaveAsBitmap(LPGW lpgw)
+{
+	static OPENFILENAMEW Ofn;
+	static WCHAR lpstrCustomFilter[256] = { '\0' };
+	static WCHAR lpstrFileName[MAX_PATH] = { '\0' };
+	static WCHAR lpstrFileTitle[MAX_PATH] = { '\0' };
+	UINT i;
+
+	// make sure GDI+ is initialized
+	gdiplusInit();
+
+	// ask GDI+ about supported encoders
+	if (pImageCodecInfo == NULL)
+		if (gdiplusGetEncoders() < 0)
+			std::cerr << "Error:  GDI+ could not retrieve the list of encoders" << std::endl;
+#if 0
+	for (i = 0; i < nImageCodecs; i++) {
+		char * descr = AnsiText(pImageCodecInfo[i].FormatDescription, S_ENC_DEFAULT);
+		char * ext = AnsiText(pImageCodecInfo[i].FilenameExtension, S_ENC_DEFAULT);
+		std::cerr << i << ": " << descr << " " << ext << std::endl;
+		free(descr);
+		free(ext);
+	}
+#endif
+
+	// assemble filter list
+	UINT npng = 1;
+	size_t len;
+	for (i = 0, len = 1; i < nImageCodecs; i++) {
+		len += wcslen(pImageCodecInfo[i].FormatDescription) + wcslen(pImageCodecInfo[i].FilenameExtension) + 2;
+		// make PNG the default selection
+		if (wcsnicmp(pImageCodecInfo[i].FormatDescription, L"PNG", 3) == 0)
+			npng = i + 1;
+	}
+	LPWSTR filter = (LPWSTR) malloc(len * sizeof(WCHAR));
+	swprintf_s(filter, len, L"%ls\t%ls\t", pImageCodecInfo[0].FormatDescription, pImageCodecInfo[0].FilenameExtension);
+	for (i = 1; i < nImageCodecs; i++) {
+		size_t len2 = wcslen(pImageCodecInfo[i].FormatDescription) + wcslen(pImageCodecInfo[i].FilenameExtension) + 3;
+		LPWSTR type = (LPWSTR) malloc(len2 * sizeof(WCHAR));
+		swprintf_s(type, len2, L"%ls\t%ls\t", pImageCodecInfo[i].FormatDescription, pImageCodecInfo[i].FilenameExtension);
+		wcscat(filter, type);
+		free(type);
+	}
+	for (i = 1; i < len; i++) {
+		if (filter[i] == TEXT('\t'))
+			filter[i] = TEXT('\0');
+	}
+
+	// init save file dialog parameters
+	Ofn.lStructSize = sizeof(OPENFILENAME);
+	Ofn.hwndOwner = lpgw->hWndGraph;
+	Ofn.lpstrInitialDir = NULL;
+	Ofn.lpstrFilter = filter;
+	Ofn.lpstrCustomFilter = lpstrCustomFilter;
+	Ofn.nMaxCustFilter = 255;
+	Ofn.nFilterIndex = npng;
+	Ofn.lpstrFile = lpstrFileName;
+	Ofn.nMaxFile = MAX_PATH;
+	Ofn.lpstrFileTitle = lpstrFileTitle;
+	Ofn.nMaxFileTitle = MAX_PATH;
+	Ofn.lpstrInitialDir = NULL;
+	Ofn.lpstrTitle = NULL;
+	Ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR | OFN_NOREADONLYRETURN;
+	Ofn.lpstrDefExt = L"png";
+
+	if (GetSaveFileNameW(&Ofn) != 0) {
+		Bitmap * bitmap = Bitmap::FromHBITMAP(lpgw->hBitmap, 0);
+		UINT ntype = Ofn.nFilterIndex - 1;
+#if 0
+		LPWSTR wtype = pImageCodecInfo[ntype].FormatDescription;
+		char * type = AnsiText(wtype, S_ENC_DEFAULT);
+		SizeF size;
+		bitmap->GetPhysicalDimension(&size);
+		std::cerr << std::endl << "Saving bitmap: size: " << size.Width << " x " << size.Height << "  type: " << type << " ..." << std::endl;
+		free(type);
+#endif
+		bitmap->Save(Ofn.lpstrFile, &(pImageCodecInfo[ntype].Clsid), NULL);
+		delete bitmap;
+	}
+	free(filter);
+}
+
+
+static Bitmap *
+ResizeBitmap(Bitmap &bmp, INT width, INT height)
+{
+	unsigned iheight = bmp.GetHeight();
+	unsigned iwidth = bmp.GetWidth();
+	if (width != height) {
+		double aspect = (double)iwidth / iheight;
+		if (iwidth > iheight)
+			height = static_cast<unsigned>(width / aspect);
+		else
+			width = static_cast<unsigned>(height * aspect);
+	}
+	Bitmap * nbmp = new Bitmap(width, height, bmp.GetPixelFormat());
+	Graphics graphics(nbmp);
+	graphics.DrawImage(&bmp, 0, 0, width - 1, height - 1);
+	return nbmp;
+}
+
+
+HBITMAP
+gdiplusLoadBitmap(LPWSTR file, int size)
+{
+	gdiplusInit();
+	Bitmap ibmp(file);
+	Bitmap * bmp = ResizeBitmap(ibmp, size, size);
+	HBITMAP hbitmap;
+	Color color(0, 0, 0);
+	bmp->GetHBITMAP(color, &hbitmap);
+	delete bmp;
+	return hbitmap;
 }

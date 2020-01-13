@@ -1,7 +1,3 @@
-/*
- * gadgets.h,v 1.1.3.1 2000/05/03 21:47:15 hbb Exp
- */
-
 /* GNUPLOT - gadgets.h */
 
 /*[
@@ -63,7 +59,8 @@ typedef enum position_type {
     second_axes,
     graph,
     screen,
-    character
+    character,
+    polar_axes
 } position_type;
 
 /* A full 3D position, with all 3 coordinates of possible using different axes.
@@ -94,11 +91,11 @@ typedef struct text_label {
 
 /* This is the default state for the axis, timestamp, and plot title labels
  * indicated by tag = -2 */
-#define NONROTATABLE_LABEL_TAG -2
+#define NONROTATING_LABEL_TAG -2
 #define ROTATE_IN_3D_LABEL_TAG -3
 #define VARIABLE_ROTATE_LABEL_TAG -4
 #define EMPTY_LABELSTRUCT \
-    {NULL, NONROTATABLE_LABEL_TAG, \
+    {NULL, NONROTATING_LABEL_TAG, \
      {character, character, character, 0.0, 0.0, 0.0}, CENTRE, 0, 0, \
      0, \
      NULL, NULL, {TC_LT, -2, 0.0}, DEFAULT_LP_STYLE_TYPE, \
@@ -109,7 +106,8 @@ typedef struct text_label {
 typedef enum arrow_type {
     arrow_end_absolute,
     arrow_end_relative,
-    arrow_end_oriented
+    arrow_end_oriented,
+    arrow_end_undefined
     } arrow_type;
 
 typedef struct arrow_def {
@@ -209,7 +207,7 @@ struct pa_style {
     int layer;			/* front/back */
 };
 #define DEFAULT_PARALLEL_AXIS_STYLE \
-	{{0, LT_BLACK, 0, DASHTYPE_SOLID, 0, 2.0, 0.0, 0, BLACK_COLORSPEC, DEFAULT_DASHPATTERN}, LAYER_FRONT }
+	{{0, LT_BLACK, 0, DASHTYPE_SOLID, 0, 0, 2.0, 0.0, DEFAULT_P_CHAR, BLACK_COLORSPEC, DEFAULT_DASHPATTERN}, LAYER_FRONT }
 
 /* The stacking direction of the key box: (vertical, horizontal) */
 typedef enum en_key_stack_direction {
@@ -288,12 +286,13 @@ typedef struct boxplot_style {
     TBOOLEAN outliers;
     int pointtype;
     int plotstyle;	/* CANDLESTICKS or FINANCEBARS */
+    double median_linewidth;
     double separation;	/* of boxplots if there are more than one factors */
     t_boxplot_factor_labels labels;	/* Which axis to put the tic labels if there are factors */
     TBOOLEAN sort_factors;	/* Sort factors in alphabetical order? */
 } boxplot_style;
 extern boxplot_style boxplot_opts;
-#define DEFAULT_BOXPLOT_STYLE { 0, 1.5, TRUE, 6, CANDLESTICKS, 1.0, BOXPLOT_FACTOR_LABELS_AUTO, FALSE }
+#define DEFAULT_BOXPLOT_STYLE { 0, 1.5, TRUE, 6, CANDLESTICKS, -1.0, 1.0, BOXPLOT_FACTOR_LABELS_AUTO, FALSE }
 
 #ifdef EAM_BOXED_TEXT
 typedef struct textbox_style {
@@ -301,8 +300,11 @@ typedef struct textbox_style {
     TBOOLEAN noborder;	/* True if you want fill only, no lines */
     double xmargin;	/* fraction of default margin to use */
     double ymargin;	/* fraction of default margin to use */
+    double linewidth;	/* applied to border */
+    t_colorspec border_color;	/* TC_LT + LT_NODRAW is "noborder" */
+    t_colorspec fillcolor;	/* only used if opaque is TRUE */
 } textbox_style;
-#define DEFAULT_TEXTBOX_STYLE { FALSE, FALSE, 1.0, 1.0 }
+#define DEFAULT_TEXTBOX_STYLE { FALSE, FALSE, 1.0, 1.0, 1.0, BLACK_COLORSPEC, BACKGROUND_COLORSPEC }
 #endif
 
 /***********************************************************/
@@ -331,6 +333,7 @@ typedef struct {
     struct position user_pos;	/* if user specified position, this is it */
     VERT_JUSTIFY vpos;		/* otherwise these guide auto-positioning */
     JUSTIFY hpos;
+    TBOOLEAN fixed;		/* prevents key in 3D plot from rotating/scaling with plot */
     t_key_sample_positioning just;
     t_key_stack_direction stack_dir;
     double swidth;		/* 'width' of the linestyle sample line in the key */
@@ -353,7 +356,7 @@ typedef struct {
 
 extern legend_key keyT;
 
-#define DEFAULT_KEYBOX_LP {0, LT_NODRAW, 0, DASHTYPE_SOLID, 0, 1.0, PTSZ_DEFAULT, 0, BLACK_COLORSPEC, DEFAULT_DASHPATTERN}
+#define DEFAULT_KEYBOX_LP {0, LT_NODRAW, 0, DASHTYPE_SOLID, 0, 0, 1.0, PTSZ_DEFAULT, DEFAULT_P_CHAR, BLACK_COLORSPEC, DEFAULT_DASHPATTERN}
 
 #define DEFAULT_KEY_POSITION { graph, graph, graph, 0.9, 0.9, 0. }
 
@@ -361,7 +364,7 @@ extern legend_key keyT;
 		{ TRUE, \
 		GPKEY_AUTO_INTERIOR_LRTBC, GPKEY_RMARGIN, \
 		DEFAULT_KEY_POSITION, \
-		JUST_TOP, RIGHT, \
+		JUST_TOP, RIGHT, TRUE, \
 		GPKEY_RIGHT, GPKEY_VERTICAL, \
 		4.0, 1.0, 0.0, 0.0, \
 		FILENAME_KEYTITLES, \
@@ -410,6 +413,7 @@ typedef struct t_image {
 } t_image;
 
 extern BoundingBox plot_bounds;	/* Plot Boundary */
+extern BoundingBox page_bounds;	/* 3D boundary prior to view transformation */
 extern BoundingBox canvas; 	/* Writable area on terminal */
 extern BoundingBox *clip_area;	/* Current clipping box */
 
@@ -450,16 +454,17 @@ extern text_label timelabel;
 /* asctime() format */
 # define DEFAULT_TIMESTAMP_FORMAT "%a %b %d %H:%M:%S %Y"
 #endif
-extern int timelabel_rotate;
 extern int timelabel_bottom;
 
 extern TBOOLEAN	polar;
+extern TBOOLEAN inverted_raxis;	/* true if R_AXIS.set_min > R_AXIS.set_max */
 
 #define ZERO 1e-8		/* default for 'zero' set option */
 extern double zero;		/* zero threshold, not 0! */
 
 extern double pointsize;
 extern double pointintervalbox;
+extern t_colorspec background_fill;
 
 #define SOUTH		1 /* 0th bit */
 #define WEST		2 /* 1th bit */
@@ -469,7 +474,6 @@ extern double pointintervalbox;
 #define border_west	(draw_border & WEST)
 #define border_south	(draw_border & SOUTH)
 #define border_north	(draw_border & NORTH)
-#define border_complete	((draw_border & 15) == 15)
 extern int draw_border;
 extern int user_border;
 extern int border_layer;
@@ -492,6 +496,7 @@ extern enum PLOT_STYLE data_style;
 extern enum PLOT_STYLE func_style;
 
 extern TBOOLEAN parametric;
+extern TBOOLEAN in_parametric;
 
 /* If last plot was a 3d one. */
 extern TBOOLEAN is_3d_plot;
@@ -528,12 +533,13 @@ extern int current_x11_windowid;
 #define LAYER_BACK        0
 #define LAYER_FRONT       1
 #define LAYER_FOREGROUND  2	/* not currently used */
+#define LAYER_PLOT       16	/* currently used only by fig.trm */
 #define LAYER_PLOTLABELS 99
 
 /* Functions exported by gadgets.c */
 
 /* moved here from util3d: */
-void draw_clip_line __PROTO((int, int, int, int));
+int draw_clip_line __PROTO((int, int, int, int));
 void draw_clip_polygon __PROTO((int , gpiPoint *));
 void draw_clip_arrow __PROTO((int, int, int, int, int));
 void clip_polygon __PROTO((gpiPoint *, gpiPoint *, int , int *));
@@ -545,8 +551,11 @@ void clip_move __PROTO((unsigned int x, unsigned int y));
 void clip_vector __PROTO((unsigned int x, unsigned int y));
 
 /* Common routines for setting line or text color from t_colorspec */
-void apply_pm3dcolor __PROTO((struct t_colorspec *tc, const struct termentry *t));
-void reset_textcolor __PROTO((const struct t_colorspec *tc, const struct termentry *t));
+void apply_pm3dcolor __PROTO((struct t_colorspec *tc));
+void reset_textcolor __PROTO((const struct t_colorspec *tc));
+
+/* Timestamp code shared by 2D and 3D */
+void do_timelabel __PROTO((unsigned int x, unsigned int y));
 
 extern fill_style_type default_fillstyle;
 
@@ -555,24 +564,24 @@ extern fill_style_type default_fillstyle;
 extern struct object default_rectangle;
 #define DEFAULT_RECTANGLE_STYLE { NULL, -1, 0, OBJ_RECTANGLE, OBJ_CLIP,	\
 	{FS_SOLID, 100, 0, BLACK_COLORSPEC},   			\
-	{0, LT_BACKGROUND, 0, DASHTYPE_SOLID, 0, 1.0, 0.0, 0, BACKGROUND_COLORSPEC, DEFAULT_DASHPATTERN}, \
+	{0, LT_BACKGROUND, 0, DASHTYPE_SOLID, 0, 0, 1.0, 0.0, DEFAULT_P_CHAR, BACKGROUND_COLORSPEC, DEFAULT_DASHPATTERN}, \
 	{.rectangle = {0, {0,0,0,0.,0.,0.}, {0,0,0,0.,0.,0.}, {0,0,0,0.,0.,0.}, {0,0,0,0.,0.,0.}}} }
 
 extern struct object default_circle;
 #define DEFAULT_CIRCLE_STYLE { NULL, -1, 0, OBJ_CIRCLE, OBJ_CLIP, \
 	{FS_SOLID, 100, 0, BLACK_COLORSPEC},   			\
-	{0, LT_BACKGROUND, 0, DASHTYPE_SOLID, 0, 1.0, 0.0, 0, BACKGROUND_COLORSPEC, DEFAULT_DASHPATTERN}, \
+	{0, LT_BACKGROUND, 0, DASHTYPE_SOLID, 0, 0, 1.0, 0.0, DEFAULT_P_CHAR, BACKGROUND_COLORSPEC, DEFAULT_DASHPATTERN}, \
 	{.circle = {1, {0,0,0,0.,0.,0.}, {graph,0,0,0.02,0.,0.}, 0., 360., TRUE }} }
 
 extern struct object default_ellipse;
 #define DEFAULT_ELLIPSE_STYLE { NULL, -1, 0, OBJ_ELLIPSE, OBJ_CLIP, \
 	{FS_SOLID, 100, 0, BLACK_COLORSPEC},   			\
-	{0, LT_BACKGROUND, 0, DASHTYPE_SOLID, 0, 1.0, 0.0, 0, BACKGROUND_COLORSPEC, DEFAULT_DASHPATTERN}, \
+	{0, LT_BACKGROUND, 0, DASHTYPE_SOLID, 0, 0, 1.0, 0.0, DEFAULT_P_CHAR, BACKGROUND_COLORSPEC, DEFAULT_DASHPATTERN}, \
 	{.ellipse = {ELLIPSEAXES_XY, {0,0,0,0.,0.,0.}, {graph,graph,0,0.05,0.03,0.}, 0. }} }
 
 #define DEFAULT_POLYGON_STYLE { NULL, -1, 0, OBJ_POLYGON, OBJ_CLIP, \
 	{FS_SOLID, 100, 0, BLACK_COLORSPEC},   			\
-	{0, LT_BLACK, 0, DASHTYPE_SOLID, 0, 1.0, 0.0, 0, BLACK_COLORSPEC, DEFAULT_DASHPATTERN}, \
+	{0, LT_BLACK, 0, DASHTYPE_SOLID, 0, 0, 1.0, 0.0, DEFAULT_P_CHAR, BLACK_COLORSPEC, DEFAULT_DASHPATTERN}, \
 	{.polygon = {0, NULL} } }
 
 #endif
@@ -599,8 +608,7 @@ void apply_head_properties __PROTO((struct arrow_style_type *arrow_properties));
 
 void free_labels __PROTO((struct text_label *tl));
 
-void get_offsets __PROTO((struct text_label *this_label,
-	struct termentry *t, int *htic, int *vtic));
+void get_offsets __PROTO((struct text_label *this_label, int *htic, int *vtic));
 void write_label __PROTO((unsigned int x, unsigned int y, struct text_label *label));
 int label_width __PROTO((const char *, int *));
 

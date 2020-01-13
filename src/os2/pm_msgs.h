@@ -1,5 +1,5 @@
 /*
- * $Id: pm_msgs.h,v 1.4 2005/10/05 08:05:41 mikulik Exp $
+ * $Id: pm_msgs.h,v 1.3 2005/08/07 09:43:33 mikulik Exp $
  */
 
 /* GNUPLOT - pm_msgs.h */
@@ -46,6 +46,7 @@
 #define SET_GRAPHICS	'G'
 #define SET_TEXT	'E'
 #define SET_LINE	'L'
+#define SET_DASH	'd'
 #define SET_FILLBOX	'B'
 #define SET_LINEWIDTH	'W'
 #define SET_ANGLE	'A'
@@ -57,7 +58,7 @@
 #define SET_SPECIAL	'o'  /* used for special options */
 #define SET_MENU	'#'
 #define GR_QUERY	'Q'
-#define GR_SUSPEND	'E'	/*'s' */
+#define GR_SUSPEND	'E'	/* 's' */
 #define GR_RESUME	'r'
 #define GR_MOVE		'M'
 #define GR_DRAW		'V'
@@ -75,7 +76,8 @@
 #define GR_RELEASE_PALETTE	'e'
 #define GR_SET_COLOR		'C'
 #define GR_SET_RGBCOLOR		'b'
-#define GR_FILLED_POLYGON	'f'
+#define GR_LTCOLOR		'N'
+#define GR_FILLED_POLYGON	'y' /* 'f' */
 #define GR_IMAGE		'i'
 #define GR_RGB_IMAGE	'I'
 

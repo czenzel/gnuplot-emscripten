@@ -1,5 +1,5 @@
 #ifndef lint
-static char *RCSid() { return RCSid("$Id: vms.c,v 1.5 2004/07/01 17:10:09 broeker Exp $"); }
+static char *RCSid() { return RCSid("$Id: vms.c,v 1.4 2004/04/13 17:24:03 broeker Exp $"); }
 #endif
 
 /* GNUPLOT - vms.c */

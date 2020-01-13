@@ -3,7 +3,7 @@ AUTOMAKE_OPTIONS = foreign
 
 ##m4-files-begin
 EXTRA_DIST = README Makefile.am.in alpha.m4 apple.m4 beos.m4 msdos.m4 \
-next.m4 pkg.m4 
+pkg.m4 
 ##m4-files-end
 
 Makefile.am: Makefile.am.in

@@ -369,7 +369,7 @@ TGIF_options()
 		int sep = strcspn(s,",");
 		if (s[sep] == ',' && (1 == sscanf(&s[sep+1],"%lf",&fontsize)))
 		    uActFontSize =  (int)(fontsize+0.5);
-		if (sep > 0) {
+		if (0 < sep && sep < sizeof(sActFont)) {
 		    strncpy(sActFont, s, sizeof(sActFont));
 		    sActFont[sep] = NUL;
 		}
@@ -634,44 +634,6 @@ TGIF_vector(unsigned int ux, unsigned int uy)
     }
 }				/* TGIF_vector */
 /*}}}  */
-#if (0) /* Not used any more */
-/***************************************************************************/
-TERM_PUBLIC void
-TGIF_arrow(
-    unsigned int sx, unsigned int sy,
-    unsigned int ex, unsigned int ey,
-    int head)
-{
-
-    TGIF_flush_poly();
-
-    sx = sx + uXshift;
-    ex = ex + uXshift;
-    sy = uYshift - sy;
-    ey = uYshift - ey;
-
-
-    if (head) {
-	fprintf(gpoutfile, "\
-poly('%s',%d,[\n\
-\t%u,%u,%u,%u],1,%u,1,%u,0,0,%u,0,8,3,0,[\n]).\n",
-		sActColor, 2, sx, sy, ex, ey, uActThick, uActNr, uActStyle);
-    } else {
-	fprintf(gpoutfile, "\
-poly('%s',%d,[\n\
-\t%u,%u,%u,%u],1,%u,1,%u,0,0,%u,0,8,3,0,[\n]).\n",
-		sActColor, 2, sx, sy, ex, ey, uActThick, uActNr, uActStyle);
-    }
-
-    uActNr++;
-
-
-
-    uLastTgifX = ex;
-    uLastTgifY = ey;
-
-}				/* TGIF_arrow */
-#endif
 
 /*}}}  */
 /***************************************************************************/

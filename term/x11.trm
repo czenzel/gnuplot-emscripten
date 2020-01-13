@@ -1,7 +1,4 @@
-/* Hello, Emacs, this is -*-C-*-
- * $Id: x11.trm,v 1.222.2.3 2015/07/09 01:40:45 sfeam Exp $
- *
- */
+/* Hello, Emacs, this is -*-C-*- */
 
 /* GNUPLOT - x11.trm */
 
@@ -326,7 +323,7 @@ int
 X11_args(int argc, char *argv[])
 {
     int nx11 = 0, i, n;
-    char **xargv, **xargv_orig; 
+    char **xargv, **xargv_orig;
 
     xargv = xargv_orig = (char **) gp_alloc(argc * sizeof(char *), "<xargv>");
 
@@ -801,10 +798,10 @@ X11_update_opts()
     if (!strcmp("xlib",term->name))
 	return;
 
-    if (UNSET != do_raise || UNSET != x11_persist || 
+    if (UNSET != do_raise || UNSET != x11_persist ||
         UNSET != ctrlq || UNSET != replot_on_resize)
     {
-	fprintf(X11_ipc, "X %d %d %d %d %d\n", 
+	fprintf(X11_ipc, "X %d %d %d %d %d\n",
 		do_raise, x11_persist, dashedlines, ctrlq, replot_on_resize);
 	fflush(X11_ipc);
     }
@@ -891,7 +888,8 @@ AGAIN:
 	    int ierr;
 	    struct timeval *timeout = NULL;
 	    FD_ZERO(&fds);
-	    FD_SET(fd, &fds);
+	    if (!paused_for_mouse)
+		FD_SET(fd, &fds);
 	    FD_SET(ipc_back_fd, &fds);
 
 	    /* When taking input from the console, we are willing to wait here	*/
@@ -907,6 +905,7 @@ AGAIN:
 	    ierr = select(ipc_back_fd + 1, SELECT_TYPE_ARG234 &fds, 0, 0, timeout);
 	    if (ierr < 0 && errno == EINTR) {
 		FD_ZERO(&fds);
+		wrap_readline_signal_handler();
 		continue;
 	    }
 	    if (FD_ISSET(ipc_back_fd, &fds)) {
@@ -955,6 +954,11 @@ AGAIN:
 			    paused_for_mouse = 0;
 			    return '\0';
 			}
+		    }
+		    if (ge.type == GE_reset) {
+			/* Error or window close */
+			paused_for_mouse = 0;
+			return '\0';
 		    }
 		}
 	    } else if (options == TERM_ONLY_CHECK_MOUSING) {
@@ -1364,7 +1368,7 @@ X11_reset()
 
 
 /* Cached sizing values for the x11 terminal.
- * Updated/Maintained in mouse.c 
+ * Updated/Maintained in mouse.c
  */
 int          X11_hchar_saved, X11_vchar_saved;
 double       X11_ymax_saved = -1.0;
@@ -1411,14 +1415,14 @@ X11_graphics()
 	last_encoding = encoding;
     }
 
-#if defined(USE_MOUSE) && defined(PIPE_IPC)
+#if defined(USE_MOUSE)
     /* EAM Jan 2013 - multiplot is incompatible with replot_on_resize.	*/
     /* FIXME: This disables replot_on_resize until the next 'set term'.	*/
     /* A cleaner solution would be to have gnuplot_x11 itself track 	*/
     /* whether the current window contains a multiplot, and not	send	*/
     /* replot requests if it does.					*/
     if (multiplot) {
-	fprintf(X11_ipc, "X %d %d %d %d %d\n", 
+	fprintf(X11_ipc, "X %d %d %d %d %d\n",
 		do_raise, x11_persist, dashedlines, ctrlq, no);
 	fflush(X11_ipc);
     }
@@ -1433,29 +1437,37 @@ X11_graphics()
        change (in the ..._saved variables). Thus I no longer need
        to ask for this information NOW, and can just use it.
      */
-	if (!default_font_size_known) {
-		IPC_LOCK = TRUE;
-		PRINT1("QG%s\n",X11_default_font);
-		FFLUSH();
-		if (ipc_back_fd >= 0 && X11_MOUSE_FEEDBACK)
-			X11_waitforinput(0);
+    if (!default_font_size_known) {
+#ifdef PIPE_IPC
+	IPC_LOCK = TRUE;
+	PRINT1("QG%s\n", X11_default_font);
+	FFLUSH();
+	if (ipc_back_fd >= 0 && X11_MOUSE_FEEDBACK)
+	    X11_waitforinput(0);
 
-		default_font_size_known = TRUE;
-		IPC_LOCK = FALSE;
-	} else {
-		/* replot. I send a Qg to tell the outboard driver to use the new
-		   window sizes. I also use the stored window sizes to update myself
-		   (inboard driver) */
-		PRINT0("Qg\n");
-		FFLUSH();
+	default_font_size_known = TRUE;
+	IPC_LOCK = FALSE;
+#else
+	/* We still get the information for OS2_IPC... */
+	PRINT1("QG%s\n", X11_default_font);
+	FFLUSH();
+	default_font_size_known = TRUE;
+#endif
+    } else {
+	/* replot. I send a Qg to tell the outboard driver to use the new
+	   window sizes. I also use the stored window sizes to update myself
+	   (inboard driver) */
+	PRINT0("Qg\n");
+	FFLUSH();
 
-		if (X11_ymax_saved > 0.0) { /* use saved sizes if they're valid */
-			term->h_char = X11_hchar_saved;
-			term->v_char = X11_vchar_saved;
-			term->h_tic = term->v_tic = X11_vchar_saved / 2.5;
-			term->ymax = X11_ymax_saved;
-		}
+	if (X11_ymax_saved > 0.0) {
+	    /* use saved sizes if they're valid */
+	    term->h_char = X11_hchar_saved;
+	    term->v_char = X11_vchar_saved;
+	    term->h_tic = term->v_tic = X11_vchar_saved / 2.5;
+	    term->ymax = X11_ymax_saved;
 	}
+    }
 #endif
 
     /* Force default font at start of plot */
@@ -1483,9 +1495,9 @@ X11_text()
 	{
 	/* Construct a mask showing which axes are active */
 	int axis_mask = 0;
-	int i;
+	AXIS_INDEX i;
 
-	for (i = FIRST_AXES; i < 2*SECOND_AXES; i++) {
+	for (i = (AXIS_INDEX)0; i < NUMBER_OF_MAIN_VISIBLE_AXES; i++) {
 	    if (axis_array[i].ticmode != NO_TICS)
 		axis_mask |= (1 << i);
 	}
@@ -2314,13 +2326,13 @@ X11_image(unsigned int M, unsigned int N, coordval *image, gpiPoint *corner, t_i
 #ifdef TERM_TABLE
 
 TERM_TABLE_START(x11_driver)
-    "x11", "X11 Window System",
+    "x11", "X11 Window System interactive terminal",
     X11_XMAX, X11_YMAX, X11_VCHAR, X11_HCHAR,
     X11_VTIC, X11_HTIC, X11_options, X11_init, X11_reset,
     X11_text, null_scale, X11_graphics, X11_move, X11_vector,
     X11_linetype, ENHX11_put_text, X11_text_angle,
     X11_justify_text, X11_point, do_arrow, X11_set_font,
-    X11_pointsize, 
+    X11_pointsize,
     TERM_CAN_MULTIPLOT|TERM_INIT_ON_REPLOT|TERM_NO_OUTPUTFILE|TERM_CAN_DASH|TERM_ALPHA_CHANNEL|TERM_LINEWIDTH|TERM_ENHANCED_TEXT,
     X11_text /* suspend can use same routine */ , 0 /* resume */ ,
     X11_fillbox, X11_linewidth
@@ -2509,20 +2521,19 @@ START_HELP(x11)
 "       set title '(mb strings)' font 'mbfont:*-fixed-medium-r-normal--14-*'",
 "",
 " The same syntax applies to the default font in Xresources settings,",
-" for example,", 
+" for example,",
 "       gnuplot*font: \\",
 "           mbfont:-misc-fixed-medium-r-normal--14-*-*-*-c-*-jisx0208.1983-0",
 "",
 " If gnuplot is built with --enable-x11-mbfonts, you can use two special",
 " PostScript font names 'Ryumin-Light-*' and 'GothicBBB-Medium-*' (standard",
 " Japanese PS fonts) without the prefix \"mbfont:\".",
-"", 
+"",
 "2 command-line_options",
 "?commands set terminal x11 command-line-options",
 "?set terminal x11 command-line-options",
 "?set term x11 command-line-options",
 "?x11 command-line-options",
-"?command-line-options",
 " In addition to the X Toolkit options, the following options may be specified",
 " on the command line when starting `gnuplot` or as resources in your",
 " \".Xdefaults\" file (note that `raise` and `persist` can be overridden",

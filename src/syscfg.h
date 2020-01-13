@@ -1,5 +1,5 @@
 /*
- * $Id: syscfg.h,v 1.56 2014/07/28 22:16:27 sfeam Exp $
+ * $Id: syscfg.h,v 1.62.2.1 2017/07/30 07:52:31 markisch Exp $
  */
 
 /* GNUPLOT - syscfg.h */
@@ -61,12 +61,6 @@
  *
  */
 
-#if defined(__NeXT__) || defined(NEXT)
-# ifndef NEXT
-#  define NEXT
-# endif
-#endif /* NeXT */
-
 #ifdef OS2
 # define OS       "OS/2"
 # define HELPFILE "gnuplot.gih"
@@ -119,7 +113,9 @@
 /* Fix for broken compiler headers
  * See stdfn.h
  */
-# define S_IFIFO  _S_IFIFO
+# if !defined(__WATCOMC__) || (__WATCOMC__ <= 1290)
+#  define S_IFIFO  _S_IFIFO
+# endif
 # define HOME    "GNUPLOT"
 # define PLOTRC  "gnuplot.ini"
 # define SHELL   "\\command.com"
@@ -139,9 +135,23 @@
 #ifndef _WIN32_IE
 # define _WIN32_IE 0x0501
 #endif
+
+/* The unicode/encoding support requires translation of file names */
+#if !defined(WINDOWS_NO_GUI)
+/* Need to include definition of fopen before re-defining */
+#include <stdlib.h>
+#include <stdio.h>
+FILE * win_fopen(const char *filename, const char *mode);
+#define fopen win_fopen
+#ifndef USE_FAKEPIPES
+FILE * win_popen(const char *filename, const char *mode);
+#undef popen
+#define popen win_popen
+#endif
+#endif
 #endif /* _WINDOWS */
 
-#if defined(MSDOS) && !defined(_Windows)
+#if defined(MSDOS)
 /* should this be here ? */
 # define OS       "MS-DOS"
 # undef HELPFILE
@@ -231,9 +241,6 @@
  * in the Windows section
  */
 #ifdef __WATCOMC__
-# include <direct.h>
-# include <dos.h>
-# define HAVE_GETCWD 1
 # define GP_EXCEPTION_NAME _exception
 #endif
 
@@ -259,11 +266,23 @@
 #define GPHUGE /* nothing */
 #define GPFAR /* nothing */
 
+#if defined(HAVE_SYS_TYPES_H)
+# include <sys/types.h>
+# if defined(HAVE_SYS_WAIT_H)
+#  include <sys/wait.h>
+# endif
+#endif
+
+#if !defined(WEXITSTATUS)
+# if defined(_WIN32) || defined(OS2)
+#  define WEXITSTATUS(stat_val) (stat_val)
+# else
+#  define WEXITSTATUS(stat_val) ((unsigned int)(stat_val) >> 8)
+# endif
+#endif
+
 /* LFS support */
 #if !defined(HAVE_FSEEKO) || !defined(HAVE_OFF_T)
-# if defined(HAVE_SYS_TYPES_H)
-#   include <sys/types.h>
-# endif
 # if defined(_MSC_VER)
 #   define off_t __int64
 # elif defined(__MINGW32__)
@@ -292,8 +311,8 @@ typedef double coordval;
 # define is_system(c) ((c) == '!')
 #endif /* not VMS */
 
+/* HBB NOTE 2014-12-16: no longer defined by autoconf; hardwired here instead */
 #ifndef RETSIGTYPE
-/* assume ANSI definition by default */
 # define RETSIGTYPE void
 #endif
 
@@ -336,7 +355,7 @@ typedef RETSIGTYPE (*sigfunc)__PROTO((void));
 #endif
 
 /* Windows needs to redefine stdin/stdout functions */
-#if defined(_Windows) && !defined(WINDOWS_NO_GUI)
+#if defined(_WIN32) && !defined(WINDOWS_NO_GUI)
 # include "win/wtext.h"
 #endif
 
@@ -394,5 +413,11 @@ typedef unsigned char _Bool;
 #define FALSE false
 
 #define TBOOLEAN bool
+
+#if defined(READLINE) || defined(HAVE_LIBREADLINE) || defined(HAVE_LIBEDITLINE) || defined(HAVE_WINEDITLINE)
+# ifndef USE_READLINE
+#  define USE_READLINE
+# endif
+#endif
 
 #endif /* !SYSCFG_H */

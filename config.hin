@@ -1,10 +1,13 @@
-/* config.hin.  Generated from configure.in by autoheader.  */
+/* config.hin.  Generated from configure.ac by autoheader.  */
 
 /* Define to allow use of certain deprecated syntax. */
 #undef BACKWARDS_COMPATIBLE
 
 /* Define if you want online help and subtopic tables sorted by column. */
 #undef COLUMN_HELP
+
+/* Define if you want to disable support for nonlinear axes */
+#undef DISABLE_NONLINEAR_AXES
 
 /* Define to treat spacebar like any other keystroke. */
 #undef DISABLE_SPACE_RAISES_CONSOLE
@@ -175,12 +178,6 @@
 /* Define to 1 if you have the `m' library (-lm). */
 #undef HAVE_LIBM
 
-/* Define to 1 if you have the `pdf' library (-lpdf). */
-#undef HAVE_LIBPDF
-
-/* Define if your PDFlib is too old to use PDF_begin_document. */
-#undef HAVE_LIBPDF_OPEN_FILE
-
 /* Define if you are using the GNU readline library. */
 #undef HAVE_LIBREADLINE
 
@@ -220,23 +217,14 @@
 /* Define to include support for mif terminal */
 #undef HAVE_MIF
 
-/* Define if your PDFlib doesn't support dash patterns. */
-#undef HAVE_NODASH_LIBPDF
-
 /* Define to 1 if the system has the type `off_t'. */
 #undef HAVE_OFF_T
-
-/* Define if your PDFlib is too old to support patterns. */
-#undef HAVE_OLD_LIBPDF
 
 /* Define to 1 if you have the `on_exit' function. */
 #undef HAVE_ON_EXIT
 
 /* Define to 1 if you have the `pclose' function. */
 #undef HAVE_PCLOSE
-
-/* Define to 1 if you have the <pdflib.h> header file. */
-#undef HAVE_PDFLIB_H
 
 /* Define to 1 if you have the `poll' function. */
 #undef HAVE_POLL
@@ -250,11 +238,17 @@
 /* Define to 1 if you have the <readline/history.h> header file. */
 #undef HAVE_READLINE_HISTORY_H
 
+/* Define if your libreadline has rl_pending_signal */
+#undef HAVE_READLINE_PENDING_SIGNAL
+
 /* Define to 1 if you have the <readline/readline.h> header file. */
 #undef HAVE_READLINE_READLINE_H
 
 /* Define if your libreadline has rl_reset_after_signal */
 #undef HAVE_READLINE_RESET
+
+/* Define if your libreadline has _rl_signal_handler */
+#undef HAVE_READLINE_SIGNAL_HANDLER
 
 /* Define to 1 if you have the `rindex' function. */
 #undef HAVE_RINDEX
@@ -373,6 +367,9 @@
 /* Define to 1 if you have the <sys/utsname.h> header file. */
 #undef HAVE_SYS_UTSNAME_H
 
+/* Define to 1 if you have <sys/wait.h> that is POSIX.1 compatible. */
+#undef HAVE_SYS_WAIT_H
+
 /* Define to 1 if you have the `tcgetattr' function. */
 #undef HAVE_TCGETATTR
 
@@ -384,6 +381,9 @@
 
 /* Define if time_t is declared in time.h. */
 #undef HAVE_TIME_T_IN_TIME_H
+
+/* Define to 1 if you have the `uname' function. */
+#undef HAVE_UNAME
 
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
@@ -436,9 +436,6 @@
 /* Define to 1 if malloc(0)==0 */
 #undef MALLOC_ZERO_RETURNS_ZERO
 
-/* Maximum number of parallel axes supported */
-#undef MAX_PARALLEL_AXES
-
 /* Define if your libreadline has no rl_ding */
 #undef MISSING_RL_DING
 
@@ -475,6 +472,9 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
+/* The patch level, a.k.a. micro version number */
+#undef PATCHLEVEL
+
 /* Define if you do have the popen and pclose functions. */
 #undef PIPES
 
@@ -487,11 +487,11 @@
 /* Define if you want the Qt terminal. */
 #undef QTTERM
 
+/* only used for docs */
+#undef QTVER
+
 /* Define if you want to use the included readline function. */
 #undef READLINE
-
-/* Define as the return type of signal handlers (`int' or `void'). */
-#undef RETSIGTYPE
 
 /* Define to the type of arg 1 for `select'. */
 #undef SELECT_TYPE_ARG1
@@ -508,9 +508,6 @@
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
 
-/* Define if you want to use the sunview terminal (sun). */
-#undef SUN
-
 /* Define if the 3dkit libray is present. */
 #undef THREEDKIT
 
@@ -524,6 +521,9 @@
 
 /* Define if you want to use the experimental ggi driver. */
 #undef USE_GGI_DRIVER
+
+/* Define if gnuplot_x11 can use KDE3 DCOP to raise konsole */
+#undef USE_KDE3_DCOP
 
 /* Define if you have interactive terminals that use mouse support. */
 #undef USE_MOUSE
@@ -558,6 +558,9 @@
 
 /* Version number of package */
 #undef VERSION
+
+/* The main version number */
+#undef VERSION_MAJOR
 
 /* Define if the vgagl libray is present. */
 #undef VGAGL

@@ -972,6 +972,7 @@ START_HELP(mif)
 "?terminal mif",
 "?term mif",
 "?mif",
+" Note: Legacy terminal.",
 " The `mif` terminal driver produces Frame Maker MIF format version 3.00.  It",
 " plots in MIF Frames with the size 15*10 cm, and plot primitives with the same",
 " pen will be grouped in the same MIF group.  Plot primitives in a `gnuplot`",

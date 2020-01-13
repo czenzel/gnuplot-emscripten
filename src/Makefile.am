@@ -48,7 +48,7 @@ datablock.c datablock.h datafile.c datafile.h dynarray.c dynarray.h \
 eval.c eval.h external.c external.h fit.c fit.h gadgets.c gadgets.h getcolor.c getcolor.h \
 gp_hist.h gp_time.h gp_types.h gplt_x11.h graph3d.c graph3d.h graphics.c graphics.h \
 help.c help.h hidden3d.c hidden3d.h history.c internal.c internal.h \
-interpol.c interpol.h libcerf.c libcerf.h \
+interpol.c interpol.h jitter.c jitter.h libcerf.c libcerf.h \
 matrix.c matrix.h misc.c misc.h mouse.c mouse.h mousecmn.h \
 multiplot.c multiplot.h national.h parse.c parse.h plot.c plot.h plot2d.c plot2d.h \
 plot3d.c plot3d.h pm3d.c pm3d.h readline.c readline.h save.c \
@@ -64,11 +64,13 @@ pkglibexec_PROGRAMS =
 
 if BUILD_GNUPLOT_X11
 pkglibexec_PROGRAMS += gnuplot_x11
-gnuplot_x11_SOURCES = gplt_x11.c gplt_x11.h gpexecute.c getcolor.c getcolor.h gpexecute.h mousecmn.h version.c version.h
-gnuplot_x11_CPPFLAGS = -DGPLT_X11_MODE $(AM_CPPFLAGS)
+gnuplot_x11_SOURCES = gplt_x11.c gplt_x11.h gpexecute.c gpexecute.h mousecmn.h version.c version.h
 XLIBS = @LIBRARIES_FOR_X@
-gnuplot_x11_LDADD = $(XLIBS)
+gnuplot_x11_LDADD = getcolor_x11.o $(XLIBS)
 endif
+
+getcolor_x11.o: getcolor.c
+	$(AM_V_CC)$(COMPILE) -c -DGPLT_X11_MODE -o getcolor_x11.o $(srcdir)/getcolor.c
 
 bf_test_SOURCES = bf_test.c
 bf_test_LIBS = -lm
@@ -81,7 +83,7 @@ SUBDIRS = $(d_beos) wxterminal qtterminal
 
 EXTRA_gnuplot_SOURCES = strftime.c vms.c
 
-EXTRA_DIST = GNUmakefile Makefile.maint NeXT OpenStep \
+EXTRA_DIST = GNUmakefile Makefile.maint \
 genopt.com gnuplot.opt x11.opt linkopt.vms \
 makefile.all makefile.awc os2 win \
 $(EXTRA_gnuplot_SOURCES)
@@ -176,12 +178,13 @@ qtterminal/QtGnuplotEvent.cpp
 gnuplot_qt_LDADD = $(QT_LIBS)
 
 # embed example (uncomment to build it)
-
+#
 # bin_PROGRAMS += embed_example
 # 
-# nodist_embed_example_SOURCES = moc_embed_example.cpp moc_QtGnuplotInstance.cpp \
-#                          moc_QtGnuplotWidget.cpp moc_QtGnuplotScene.cpp \
-#                          moc_QtGnuplotEvent.cpp qrc_QtGnuplotResource.cpp
+# nodist_embed_example_SOURCES = qtterminal/moc_embed_example.cpp \
+#         qtterminal/moc_QtGnuplotInstance.cpp \
+#         qtterminal/moc_QtGnuplotWidget.cpp qtterminal/moc_QtGnuplotScene.cpp \
+#         qtterminal/moc_QtGnuplotEvent.cpp qtterminal/qrc_QtGnuplotResource.cpp
 # 
 # embed_example_SOURCES = qtterminal/embed_example.cpp \
 # qtterminal/QtGnuplotWidget.cpp qtterminal/QtGnuplotEvent.cpp \

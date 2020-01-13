@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: parse.c,v 1.88.2.6 2016/01/11 23:32:50 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - parse.c */
 
 /*[
@@ -62,8 +58,10 @@ int at_highest_column_used = -1;
 /* This is checked by df_readascii() */
 TBOOLEAN parse_1st_row_as_headers = FALSE;
 
+/* This is used by df_open() and df_readascii() */
+udvt_entry *df_array = NULL;
+
 /* Iteration structures used for bookkeeping */
-/* Iteration can be nested so long as different iterators are used */
 t_iterator * plot_iterator = NULL;
 t_iterator * set_iterator = NULL;
 
@@ -98,9 +96,14 @@ static void parse_multiplicative_expression __PROTO((void));
 static void parse_unary_expression __PROTO((void));
 static void parse_sum_expression __PROTO((void));
 static int  parse_assignment_expression __PROTO((void));
+static int  parse_array_assignment_expression __PROTO((void));
 static int is_builtin_function __PROTO((int t_num));
 
 static void set_up_columnheader_parsing __PROTO((struct at_entry *previous ));
+
+static TBOOLEAN no_iteration __PROTO((t_iterator *));
+static void reevaluate_iteration_limits __PROTO((t_iterator *iter));
+static void reset_iteration __PROTO((t_iterator *iter));
 
 /* Internal variables: */
 
@@ -168,6 +171,13 @@ const_express(struct value *valptr)
     if (undefined) {
 	int_error(tkn, "undefined value");
     }
+
+    if (valptr->type == ARRAY) {
+	/* Make sure no one tries to free it later */
+	valptr->type = NOTDEFINED;
+	int_error(NO_CARET, "const_express: unsupported array operation");
+    }
+
     return (valptr);
 }
 
@@ -186,9 +196,11 @@ string_or_express(struct at_type **atptr)
     int i;
     TBOOLEAN has_dummies;
 
+    static char *array_placeholder = "@@";
     static char* str = NULL;
     free(str);
     str = NULL;
+    df_array = NULL;
 
     if (atptr)
 	*atptr = NULL;
@@ -200,8 +212,20 @@ string_or_express(struct at_type **atptr)
     if (equals(c_token,"$"))
 	return parse_datablock_name();
 
+    /* special keywords */
+    if (equals(c_token,"keyentry"))
+	return NULL;
+
     if (isstring(c_token) && (str = try_to_get_string()))
 	return str;
+
+    /* If this is a bare array name for an existing array, store a pointer */
+    /* for df_open() to use.  "@@" is a magic pseudo-filename passed to    */
+    /* df_open() that tells it to use the stored pointer.                  */
+    if (type_udv(c_token) == ARRAY && !equals(c_token+1, "[")) {
+	df_array = add_udv(c_token++);
+	return array_placeholder;
+    }
 
     /* parse expression */
     temp_at();
@@ -417,29 +441,106 @@ accept_multiplicative_expression()
 static int
 parse_assignment_expression()
 {
-    /* Check for assignment operator */
+    /* Check for assignment operator Var = <expr> */
     if (isletter(c_token) && equals(c_token + 1, "=")) {
+
 	/* push the variable name */
 	union argument *foo = add_action(PUSHC);
 	char *varname = NULL;
 	m_capture(&varname,c_token,c_token);
 	foo->v_arg.type = STRING;
 	foo->v_arg.v.string_val = varname;
+
+	/* push a dummy variable that would be the index if this were an array */
+	/* FIXME: It would be nice to hide this from "show at" */
+	foo = add_action(PUSHC);
+	foo->v_arg.type = NOTDEFINED;
+
+	/* push the expression whose value it will get */
 	c_token += 2;
-	/* and the expression whose value it will get */
 	parse_expression();
-	/* and the actual assignment operation */
+
+	/* push the actual assignment operation */
 	(void) add_action(ASSIGN);
 	return 1;
     }
+
+    /* Check for assignment to an array element Array[<expr>] = <expr> */
+    if (parse_array_assignment_expression())
+	return 1;
+
     return 0;
 }
 
+/*
+ * If an array assignment is the first thing on a command line it is handled by
+ * the separate routine array_assignment().
+ * Here we catch assignments that are embedded in an expression.
+ * Examples:
+ *	print A[2] = foo
+ *	A[1] = A[2] = A[3] = 0
+ */
+static int
+parse_array_assignment_expression()
+{
+    /* Check for assignment to an array element Array[<expr>] = <expr> */
+    if (isletter(c_token) && equals(c_token+1, "[")) {
+	char *varname = NULL;
+	union argument *foo;
+	int save_action, save_token;
+
+	/* Quick check for the most common false positives */
+	/* i.e. other constructs that begin with "name["   */
+	/* FIXME: quicker than the full test below, but do we care? */
+	if (equals(c_token+3, "]") && !equals(c_token+4, "="))
+	    return 0;
+	if (equals(c_token+3, ":"))	/* substring s[foo:baz] */
+	    return 0;
+
+	/* Is this really a known array name? */
+	if (type_udv(c_token) != ARRAY)
+	    return 0;
+
+	/* Save state of the action table and the command line */
+	save_action = at->a_count;
+	save_token = c_token;
+
+	/* push the array name */
+	m_capture(&varname,c_token,c_token);
+	foo = add_action(PUSHC);
+	foo->v_arg.type = STRING;
+	foo->v_arg.v.string_val = varname;
+
+	/* push the index */
+	c_token += 2;
+	parse_expression();
+
+	/* If this wasn't really an array element assignment, back out. */
+	/* NB: Depending on what we just parsed, this may leak memory.  */
+	if (!equals(c_token, "]") || !equals(c_token+1, "=")) {
+	    c_token = save_token;
+	    at->a_count = save_action;
+	    free(varname);
+	    return 0;
+	}
+
+	/* Now we evaluate the expression whose value it will get */
+	c_token += 2;
+	parse_expression();
+
+	/* push the actual assignment operation */
+	(void) add_action(ASSIGN);
+	return 1;
+    }
+
+    return 0;
+}
 
 /* add action table entries for primary expressions, i.e. either a
  * parenthesized expression, a variable name, a numeric constant, a
  * function evaluation, a power operator or postfix '!' (factorial)
- * expression */
+ * expression.
+ * Sep 2016 cardinality expression |Array| */
 static void
 parse_primary_expression()
 {
@@ -461,25 +562,49 @@ parse_primary_expression()
 	struct value a;
 
 	c_token++;
-	if (equals(c_token,"N")) {	/* $N == pseudocolumn -3 means "last column" */
+	if (!isanumber(c_token)) {
+	    if (equals(c_token+1, "[")) {
+		struct udvt_entry *datablock_udv;
+		c_token--;
+		datablock_udv = get_udv_by_name(parse_datablock_name());
+		if (!datablock_udv)
+		    int_error(c_token-2,"No such datablock");
+		add_action(PUSH)->udv_arg = datablock_udv;
+	    } else
+		int_error(c_token, "Column number or datablock line expected");
+	} else if (equals(c_token,"N")) {
+	    /* $N == pseudocolumn -3 means "last column" */
 	    c_token++;
 	    Ginteger(&a, -3);
 	    at_highest_column_used = -3;
-	} else if (!isanumber(c_token)) {
-	    int_error(c_token, "Column number expected");
+	    add_action(DOLLARS)->v_arg = a;
 	} else {
 	    convert(&a, c_token++);
 	    if (a.type != INTGR || a.v.int_val < 0)
 		int_error(c_token, "Positive integer expected");
 	    if (at_highest_column_used < a.v.int_val)
 		at_highest_column_used = a.v.int_val;
+	    add_action(DOLLARS)->v_arg = a;
 	}
-	add_action(DOLLARS)->v_arg = a;
+    } else if (equals(c_token, "|")) {
+	struct udvt_entry *udv;
+	c_token++;
+	if (equals(c_token,"$")) {
+	    udv = get_udv_by_name(parse_datablock_name());
+	    if (!udv)
+		int_error(c_token-1, "no such datablock");
+	} else {
+	    udv = add_udv(c_token++);
+	    if (udv->udv_value.type != ARRAY)
+		int_error(c_token-1, "not an array");
+	}
+	add_action(PUSH)->udv_arg = udv;
+	if (!equals(c_token, "|"))
+	    int_error(c_token, "'|' expected");
+	c_token++;
+	add_action(CARDINALITY);
     } else if (isanumber(c_token)) {
-	/* work around HP 9000S/300 HP-UX 9.10 cc limitation ... */
-	/* HBB 20010724: use this code for all platforms, then */
 	union argument *foo = add_action(PUSHC);
-
 	convert(&(foo->v_arg), c_token);
 	c_token++;
     } else if (isletter(c_token)) {
@@ -498,7 +623,10 @@ parse_primary_expression()
 		struct udvt_entry *udv = add_udv(c_token+2);
 		union argument *foo = add_action(PUSHC);
 		foo->v_arg.type = INTGR;
-		foo->v_arg.v.int_val = udv->udv_undef ? 0 : 1;
+		if (udv->udv_value.type == NOTDEFINED)
+		    foo->v_arg.v.int_val = 0;
+		else
+		    foo->v_arg.v.int_val = 1;
 		c_token += 4;  /* skip past "defined ( <foo> ) " */
 		return;
 	    }
@@ -605,50 +733,71 @@ parse_primary_expression()
 	/* this dynamically allocated string will be freed by free_at() */
 	m_quote_capture(&(foo->v_arg.v.string_val), c_token, c_token);
 	c_token++;
-    } else
+    } else {
 	int_error(c_token, "invalid expression ");
-
-    /* add action code for ! (factorial) operator */
-    while (equals(c_token, "!")) {
-	c_token++;
-	(void) add_action(FACTORIAL);
-    }
-    /* add action code for ** operator */
-    if (equals(c_token, "**")) {
-	c_token++;
-	parse_unary_expression();
-	(void) add_action(POWER);
     }
 
-    /* Parse and add actions for range specifier applying to previous entity.
-     * Currently only used to generate substrings, but could also be used to
-     * extract vector slices.
-     */
-    if (equals(c_token, "[") && !isanumber(c_token-1)) {
-	/* handle '*' or empty start of range */
-	if (equals(++c_token,"*") || equals(c_token,":")) {
-	    union argument *empty = add_action(PUSHC);
-	    empty->v_arg.type = INTGR;
-	    empty->v_arg.v.int_val = 1;
-	    if (equals(c_token,"*"))
+    /* The remaining operators are postfixes and can be stacked, e.g. */
+    /* Array[i]**2, so we may have to loop to catch all of them.      */
+    while (TRUE) {
+
+	/* add action code for ! (factorial) operator */
+	if (equals(c_token, "!")) {
+	    c_token++;
+	    (void) add_action(FACTORIAL);
+	}
+
+	/* add action code for ** operator */
+	else if (equals(c_token, "**")) {
+	    c_token++;
+	    parse_unary_expression();
+	    (void) add_action(POWER);
+	}
+
+	/* Parse and add actions for range specifier applying to previous entity.
+	 * Currently the [beg:end] form is used to generate substrings, but could
+	 * also be used to extract vector slices.  The [i] form is used to index
+	 * arrays, but could also be a shorthand for extracting a single-character
+	 * substring.
+	 */
+	else if (equals(c_token, "[") && !isanumber(c_token-1)) {
+	    /* handle '*' or empty start of range */
+	    if (equals(++c_token,"*") || equals(c_token,":")) {
+		union argument *empty = add_action(PUSHC);
+		empty->v_arg.type = INTGR;
+		empty->v_arg.v.int_val = 1;
+		if (equals(c_token,"*"))
+		    c_token++;
+	    } else
+		parse_expression();
+
+	    /* handle array indexing (single value in square brackets) */
+	    if (equals(c_token, "]")) {
 		c_token++;
-	} else
-	    parse_expression();
-	if (!equals(c_token, ":"))
-	    int_error(c_token, "':' expected");
-	/* handle '*' or empty end of range */
-	if (equals(++c_token,"*") || equals(c_token,"]")) {
-	    union argument *empty = add_action(PUSHC);
-	    empty->v_arg.type = INTGR;
-	    empty->v_arg.v.int_val = 65535; /* should be INT_MAX */
-	    if (equals(c_token,"*"))
-		c_token++;
-	} else
-	    parse_expression();
-	if (!equals(c_token, "]"))
-	    int_error(c_token, "']' expected");
-	c_token++;
-	(void) add_action(RANGE);
+		(void) add_action(INDEX);
+		continue;
+	    }
+
+	    if (!equals(c_token, ":"))
+		int_error(c_token, "':' expected");
+	    /* handle '*' or empty end of range */
+	    if (equals(++c_token,"*") || equals(c_token,"]")) {
+		union argument *empty = add_action(PUSHC);
+		empty->v_arg.type = INTGR;
+		empty->v_arg.v.int_val = 65535; /* should be INT_MAX */
+		if (equals(c_token,"*"))
+		    c_token++;
+	    } else
+		parse_expression();
+	    if (!equals(c_token, "]"))
+		int_error(c_token, "']' expected");
+	    c_token++;
+	    (void) add_action(RANGE);
+
+	/* Whatever this is, it isn't another postfix operator */
+	} else {
+	    break;
+	}
     }
 }
 
@@ -955,8 +1104,6 @@ parse_link_via( struct udft_entry *udf )
 	int_error(c_token,"Missing expression");
 
     /* Save action table for the linkage mapping */
-    strcpy(c_dummy_var[0], "x");
-    strcpy(c_dummy_var[1], "y");
     dummy_func = udf;
     free_at(udf->at);
     udf->at = perm_at();
@@ -1055,6 +1202,8 @@ add_udv(int t_num)
 {
     char varname[MAX_ID_LEN+1];
     copy_str(varname, t_num, MAX_ID_LEN);
+    if (token[t_num].length > MAX_ID_LEN-1)
+	int_warn(t_num, "truncating variable name that is too long");
     return add_udv_by_name(varname);
 }
 
@@ -1106,11 +1255,37 @@ is_builtin_function(int t_num)
     return (0);
 }
 
+/*
+ * Test for the existence of a function without triggering errors
+ * Return values:
+ *   0  no such function is defined
+ *  -1  built-in function
+ *   1  user-defined function
+ */
+int
+is_function(int t_num)
+{
+    struct udft_entry **udf_ptr = &first_udf;
+
+    if (is_builtin_function(t_num))
+	return -1;
+
+    while (*udf_ptr) {
+	if (equals(t_num, (*udf_ptr)->udf_name))
+	    return 1;
+	udf_ptr = &((*udf_ptr)->next_udf);
+    }
+
+    return 0;
+}
+
 /* Look for iterate-over-plot constructs, of the form
  *    for [<var> = <start> : <end> { : <increment>}] ...
  * If one (or more) is found, an iterator structure is allocated and filled
  * and a pointer to that structure is returned.
  * The pointer is NULL if no "for" statements are found.
+ * If the iteration limits are constants, store them as is.
+ * If they are given as expressions, store an action table for the expression.
  */
 t_iterator *
 check_for_iteration()
@@ -1118,36 +1293,66 @@ check_for_iteration()
     char *errormsg = "Expecting iterator \tfor [<var> = <start> : <end> {: <incr>}]\n\t\t\tor\tfor [<var> in \"string of words\"]";
     int nesting_depth = 0;
     t_iterator *iter = NULL;
+    t_iterator *prev = NULL;
     t_iterator *this_iter = NULL;
+    TBOOLEAN no_parent = FALSE;
 
     /* Now checking for iteration parameters */
     /* Nested "for" statements are supported, each one corresponds to a node of the linked list */
     while (equals(c_token, "for")) {
 	struct udvt_entry *iteration_udv = NULL;
+	t_value original_udv_value;
 	char *iteration_string = NULL;
 	int iteration_start;
 	int iteration_end;
 	int iteration_increment = 1;
 	int iteration_current;
 	int iteration = 0;
-	TBOOLEAN empty_iteration;
-	TBOOLEAN just_once = FALSE;
+	struct at_type *iteration_start_at = NULL;
+	struct at_type *iteration_end_at = NULL;
 
 	c_token++;
 	if (!equals(c_token++, "[") || !isletter(c_token))
 	    int_error(c_token-1, errormsg);
 	iteration_udv = add_udv(c_token++);
+	original_udv_value = iteration_udv->udv_value;
+	iteration_udv->udv_value.type = NOTDEFINED;
 
 	if (equals(c_token, "=")) {
 	    c_token++;
-	    iteration_start = int_expression();
+	    if (isanumber(c_token) && equals(c_token+1,":")) {
+		/* Save the constant value only */
+		iteration_start = int_expression();
+	    } else {
+		/* Save the expression as well as the value */
+		struct value v;
+		iteration_start_at = perm_at();
+		if (no_parent) {
+		    iteration_start = 0;
+		} else {
+		    evaluate_at(iteration_start_at, &v);
+		    iteration_start = real(&v);
+		}
+	    }
 	    if (!equals(c_token++, ":"))
 	    	int_error(c_token-1, errormsg);
 	    if (equals(c_token,"*")) {
 		iteration_end = INT_MAX;
 		c_token++;
-	    } else
+	    } else if (isanumber(c_token) && (equals(c_token+1,":") || equals(c_token+1,"]"))) {
+		/* Save the constant value only */
 		iteration_end = int_expression();
+	    } else {
+		/* Save the expression as well as the value */
+		struct value v;
+		iteration_end_at = perm_at();
+		if (no_parent) {
+		    iteration_end = 0;
+		} else {
+		    evaluate_at(iteration_end_at, &v);
+		    iteration_end = real(&v);
+		}
+	    }
 	    if (equals(c_token,":")) {
 	    	c_token++;
 	    	iteration_increment = int_expression();
@@ -1156,168 +1361,210 @@ check_for_iteration()
 	    }
 	    if (!equals(c_token++, "]"))
 	    	int_error(c_token-1, errormsg);
-	    if (iteration_udv->udv_undef == FALSE)
-		gpfree_string(&(iteration_udv->udv_value));
+	    gpfree_array(&(iteration_udv->udv_value));
+	    gpfree_string(&(iteration_udv->udv_value));
 	    Ginteger(&(iteration_udv->udv_value), iteration_start);
-	    iteration_udv->udv_undef = FALSE;
 	}
 	else if (equals(c_token++, "in")) {
-	    iteration_string = try_to_get_string();
-	    if (!iteration_string)
+	    /* Assume this is a string-valued expression. */
+	    /* It might be worth treating a string constant as a special case */
+	    struct value v;
+	    iteration_start_at = perm_at();
+	    evaluate_at(iteration_start_at, &v);
+	    if (v.type != STRING)
 	    	int_error(c_token-1, errormsg);
 	    if (!equals(c_token++, "]"))
 	    	int_error(c_token-1, errormsg);
+	    iteration_string = v.v.string_val;
 	    iteration_start = 1;
 	    iteration_end = gp_words(iteration_string);
-	    if (iteration_udv->udv_undef == FALSE)
-	    	gpfree_string(&(iteration_udv->udv_value));
+	    gpfree_array(&(iteration_udv->udv_value));
+	    gpfree_string(&(iteration_udv->udv_value));
 	    Gstring(&(iteration_udv->udv_value), gp_word(iteration_string, 1));
-	    iteration_udv->udv_undef = FALSE;
 	}
 	else /* Neither [i=B:E] or [s in "foo"] */
 	    int_error(c_token-1, errormsg);
 
 	iteration_current = iteration_start;
 
-	empty_iteration = FALSE;	
-	if ( (iteration_udv != NULL)
-	&&   ((iteration_end > iteration_start && iteration_increment < 0)
-	   || (iteration_end < iteration_start && iteration_increment > 0))) {
-		empty_iteration = TRUE;
-		FPRINTF((stderr,"Empty iteration\n"));
+	this_iter = gp_alloc(sizeof(t_iterator), "iteration linked list");
+	this_iter->original_udv_value = original_udv_value;
+	this_iter->iteration_udv = iteration_udv; 
+	this_iter->iteration_string = iteration_string;
+	this_iter->iteration_start = iteration_start;
+	this_iter->iteration_end = iteration_end;
+	this_iter->iteration_increment = iteration_increment;
+	this_iter->iteration_current = iteration_current;
+	this_iter->iteration = iteration;
+	this_iter->start_at = iteration_start_at;
+	this_iter->end_at = iteration_end_at;
+	this_iter->next = NULL;
+
+	if (nesting_depth == 0) {
+	    /* first "for" statement: this will be the listhead */
+	    iter = this_iter;
+	} else {
+	    /* nested "for": attach newly created node to the end of the list */
+	    prev->next = this_iter;
+	}
+	prev = this_iter;
+
+	/* If some depth of a nested iteration evaluates to an empty range, the
+	 * evaluated limits of depths below it are moot (and possibly invalid).
+	 * This flag tells us to skip their evaluation to avoid irrelevant errors.
+	 */
+	if (no_iteration(this_iter)) {
+	    no_parent = TRUE;
+	    FPRINTF((stderr,"iteration at level %d is moot\n", nesting_depth));
 	}
 
-	/* Allocating a node of the linked list nested iterations. */
-	/* Iterating just once is the same as not iterating at all */
-	/* so we skip building the node in that case.		   */
-	if (iteration_start == iteration_end)
-	    just_once = TRUE;
-	if (iteration_start < iteration_end && iteration_end < iteration_start + iteration_increment)
-	    just_once = TRUE;
-	if (iteration_start > iteration_end && iteration_end > iteration_start + iteration_increment)
-	    just_once = TRUE;
-
-	if (!just_once) {
-	    this_iter = gp_alloc(sizeof(t_iterator), "iteration linked list");
-	    this_iter->iteration_udv = iteration_udv; 
-	    this_iter->iteration_string = iteration_string;
-	    this_iter->iteration_start = iteration_start;
-	    this_iter->iteration_end = iteration_end;
-	    this_iter->iteration_increment = iteration_increment;
-	    this_iter->iteration_current = iteration_current;
-	    this_iter->iteration = iteration;
-	    this_iter->done = FALSE;
-	    this_iter->really_done = FALSE;
-	    this_iter->empty_iteration = empty_iteration;
-	    this_iter->next = NULL;
-	    this_iter->prev = NULL;
-	    if (nesting_depth == 0) {
-		/* first "for" statement: this will be the listhead */
-		iter = this_iter;
-	    }
-	    else {
-		/* not the first "for" statement: attach the newly created node to the end of the list */
-		iter->prev->next = this_iter;  /* iter->prev points to the last node of the list */
-		this_iter->prev = iter->prev;
-	    }
-	    iter->prev = this_iter; /* a shortcut: making the list circular */
-
-	    /* if one iteration in the chain is empty, the subchain of nested iterations is too */
-	    if (!iter->empty_iteration) 
-		iter->empty_iteration = empty_iteration;
-
-	    nesting_depth++;
-	}
+	nesting_depth++;
     }
 
     return iter;
 }
 
-/* Set up next iteration.
- * Return TRUE if there is one, FALSE if we're done
+/*
+ * Reevaluate the iteration limits
+ * (in case they are functions whose parameters have taken 
+ * on a new value)
+ */
+static void
+reevaluate_iteration_limits(t_iterator *iter)
+{
+    if (iter->start_at) {
+	struct value v;
+	evaluate_at(iter->start_at, &v);
+	if (iter->iteration_string) {
+	    /* unnecessary if iteration string is a constant */
+	    free(iter->iteration_string);
+	    if (v.type != STRING)
+		int_error(NO_CARET, "corrupt iteration string");
+	    iter->iteration_string = v.v.string_val;
+	    iter->iteration_start = 1;
+	    iter->iteration_end = gp_words(iter->iteration_string);
+	} else {
+	    iter->iteration_start = real(&v);
+	}
+    }
+    if (iter->end_at) {
+	struct value v;
+	evaluate_at(iter->end_at, &v);
+	iter->iteration_end = real(&v);
+    }
+}
+
+/*
+ * Reset iteration at this level to start value.
+ * Any iteration levels underneath are reset also.
+ */
+static void
+reset_iteration(t_iterator *iter)
+{
+    if (!iter)
+	return;
+
+    reevaluate_iteration_limits(iter);
+    iter->iteration = -1;
+    iter->iteration_current = iter->iteration_start;
+    if (iter->iteration_string) {
+	gpfree_string(&(iter->iteration_udv->udv_value));
+	Gstring(&(iter->iteration_udv->udv_value), 
+		gp_word(iter->iteration_string, iter->iteration_current));
+    } else {
+	/* This traps fatal user error of reassigning iteration variable to a string */
+	gpfree_string(&(iter->iteration_udv->udv_value));
+	Ginteger(&(iter->iteration_udv->udv_value), iter->iteration_current);	
+    }
+    reset_iteration(iter->next);
+}
+
+/*
+ * Increment the iteration position recursively.
+ * returns TRUE if the iteration is still in range
+ * returns FALSE if the incement put it past the end limit
  */
 TBOOLEAN
 next_iteration(t_iterator *iter)
 {
-    t_iterator *this_iter;
-    TBOOLEAN condition = FALSE;
-    
-    if (!iter || iter->empty_iteration)
+    /* Once it goes out of range it will stay that way until reset */
+    if (!iter || no_iteration(iter))
 	return FALSE;
 
-    /* Support for nested iteration:
-     * we start with the innermost loop. */
-    this_iter = iter->prev; /* linked to the last element of the list */
-    
-    if (!this_iter)
-	return FALSE;
-    
-    while (!iter->really_done && this_iter != iter && this_iter->done) {
-	this_iter->iteration_current = this_iter->iteration_start;
-	this_iter->done = FALSE;
-	if (this_iter->iteration_string) {
-	    gpfree_string(&(this_iter->iteration_udv->udv_value));
-	    Gstring(&(this_iter->iteration_udv->udv_value), 
-		    gp_word(this_iter->iteration_string, this_iter->iteration_current));
-	} else {
-	    gpfree_string(&(this_iter->iteration_udv->udv_value));
-	    Ginteger(&(this_iter->iteration_udv->udv_value), this_iter->iteration_current);	
-	}
-	
-	this_iter = this_iter->prev;
+    /* Give sub-iterations a chance to advance */
+    if (next_iteration(iter->next)) {
+	if (iter->iteration < 0)
+	    iter->iteration = 0;
+	return TRUE;
     }
-   
-    if (!this_iter->iteration_udv) {
-	this_iter->iteration = 0;
-	return FALSE;
+
+    /* Increment at this level */
+    if (iter->iteration < 0) {
+	/* Just reset, haven't used start value yet */
+	iter->iteration = 0;
+	if (!empty_iteration(iter))
+	    return TRUE;
+    } else {
+	iter->iteration++;
+	iter->iteration_current += iter->iteration_increment;
     }
-    iter->iteration++;
-    /* don't increment if we're at the last iteration */
-    if (!iter->really_done)
-	this_iter->iteration_current += this_iter->iteration_increment;
-    if (this_iter->iteration_string) {
-	gpfree_string(&(this_iter->iteration_udv->udv_value));
-	Gstring(&(this_iter->iteration_udv->udv_value), 
-		gp_word(this_iter->iteration_string, this_iter->iteration_current));
+    if (iter->iteration_string) {
+	gpfree_string(&(iter->iteration_udv->udv_value));
+	Gstring(&(iter->iteration_udv->udv_value), 
+		gp_word(iter->iteration_string, iter->iteration_current));
     } else {
 	/* This traps fatal user error of reassigning iteration variable to a string */
-	gpfree_string(&(this_iter->iteration_udv->udv_value));
-	Ginteger(&(this_iter->iteration_udv->udv_value), this_iter->iteration_current);	
+	gpfree_string(&(iter->iteration_udv->udv_value));
+	Ginteger(&(iter->iteration_udv->udv_value), iter->iteration_current);	
     }
-    
-    /* Mar 2014 revised to avoid integer overflow */
-    if (this_iter->iteration_increment > 0
-    &&  this_iter->iteration_end - this_iter->iteration_current < this_iter->iteration_increment)
-	this_iter->done = TRUE;
-    else if (this_iter->iteration_increment < 0
-    &&  this_iter->iteration_end - this_iter->iteration_current > this_iter->iteration_increment)
-	this_iter->done = TRUE;
-    else
-	this_iter->done = FALSE;
-    
-    /* We return false only if we're, um, really done */
-    this_iter = iter;
-    while (this_iter) {
-	condition = condition || (!this_iter->done);
-	this_iter = this_iter->next;
-    }
-    if (!condition) {
-	if (!iter->really_done) {
-	    iter->really_done = TRUE;
-	    condition = TRUE;
-	} else 
-	    condition = FALSE;
-    }
-    return condition;
+   
+    /* If this runs off the end, leave the value out-of-range and return FALSE */ 
+    if (iter->iteration_increment > 0 &&  iter->iteration_end - iter->iteration_current < 0)
+	return FALSE;
+    if (iter->iteration_increment < 0 &&  iter->iteration_end - iter->iteration_current > 0)
+	return FALSE;
+
+    if (iter->next == NULL)
+	return TRUE;
+
+    /* Reset sub-iterations, if any */
+    reset_iteration(iter->next);
+
+    /* Go back to top or call self recursively */
+    return next_iteration(iter);
 }
 
+/*
+ * Returns TRUE if
+ * - this really is an iteration and
+ * - the top level iteration covers no usable range
+ */
+static TBOOLEAN
+no_iteration(t_iterator *iter)
+{
+    if (!iter)
+	return FALSE;
+
+    if ((iter->iteration_end > iter->iteration_start && iter->iteration_increment < 0)
+    ||  (iter->iteration_end < iter->iteration_start && iter->iteration_increment > 0)) {
+	return TRUE;
+    }
+
+    return FALSE;
+}
+
+/*
+ * Recursive test that no empty iteration exists in a nested set of iterations
+ */
 TBOOLEAN
 empty_iteration(t_iterator *iter)
 {
     if (!iter)
 	return FALSE;
+    else if (no_iteration(iter))
+	return TRUE;
     else
-	return iter->empty_iteration;
+	return no_iteration(iter->next);
 }
 
 t_iterator *
@@ -1325,7 +1572,11 @@ cleanup_iteration(t_iterator *iter)
 {
     while (iter) {
 	t_iterator *next = iter->next;
+	gpfree_string(&(iter->iteration_udv->udv_value));
+	iter->iteration_udv->udv_value = iter->original_udv_value;
 	free(iter->iteration_string);
+	free_at(iter->start_at);
+	free_at(iter->end_at);
 	free(iter);
 	iter = next;
     }
@@ -1368,11 +1619,6 @@ set_up_columnheader_parsing( struct at_entry *previous )
 	    if (at_highest_column_used < u->udv_value.v.int_val)
 		at_highest_column_used = u->udv_value.v.int_val;
 	}
-#if (0) /* Currently handled elsewhere, but could be done here instead */
-	if (u->udv_value.type == STRING) {
-	    parse_1st_row_as_headers = TRUE;
-	}
-#endif
     }
 
     /* NOTE: There is no way to handle ... using (column(<general expression>)) */

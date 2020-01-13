@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: save.c,v 1.256.2.20 2016/08/27 20:50:12 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - save.c */
 
 /*[
@@ -44,6 +40,7 @@ static char *RCSid() { return RCSid("$Id: save.c,v 1.256.2.20 2016/08/27 20:50:1
 #include "gp_time.h"
 #include "graphics.h"
 #include "hidden3d.h"
+#include "jitter.h"
 #include "misc.h"
 #include "plot2d.h"
 #include "plot3d.h"
@@ -56,11 +53,12 @@ static char *RCSid() { return RCSid("$Id: save.c,v 1.256.2.20 2016/08/27 20:50:1
 
 static void save_functions__sub __PROTO((FILE *));
 static void save_variables__sub __PROTO((FILE *));
-static void save_tics __PROTO((FILE *, AXIS_INDEX));
+static void save_tics __PROTO((FILE *, struct axis *));
+static void save_mtics __PROTO((FILE *, struct axis *));
 static void save_zeroaxis __PROTO((FILE *,AXIS_INDEX));
 static void save_set_all __PROTO((FILE *));
 
-static const char *coord_msg[] = {"first ", "second ", "graph ", "screen ", "character "};
+const char *coord_msg[] = {"first ", "second ", "graph ", "screen ", "character ", "polar "};
 /*
  *  functions corresponding to the arguments of the GNUPLOT `save` command
  */
@@ -135,19 +133,40 @@ save_variables__sub(FILE *fp)
     struct udvt_entry *udv = first_udv->next_udv;
 
     while (udv) {
-	if (!udv->udv_undef) {
-	    if (strncmp(udv->udv_name,"GPVAL_",6)
-	     && strncmp(udv->udv_name,"MOUSE_",6)
-	     && strncmp(udv->udv_name,"$",1)
-	     && (strncmp(udv->udv_name,"ARG",3) || (strlen(udv->udv_name) != 4))
-	     && strncmp(udv->udv_name,"NaN",4)) {
-		fprintf(fp, "%s = ", udv->udv_name);
-		disp_value(fp, &(udv->udv_value), TRUE);
-		(void) putc('\n', fp);
+	if (udv->udv_value.type != NOTDEFINED) {
+	    if ((udv->udv_value.type == ARRAY)
+		&& strncmp(udv->udv_name,"ARGV",4)) {
+		    fprintf(fp,"array %s[%d] = ", udv->udv_name,
+			udv->udv_value.v.value_array[0].v.int_val);
+		    save_array_content(fp, udv->udv_value.v.value_array);
+	    } else if (strncmp(udv->udv_name,"GPVAL_",6)
+		 && strncmp(udv->udv_name,"GPFUN_",6)
+		 && strncmp(udv->udv_name,"MOUSE_",6)
+		 && strncmp(udv->udv_name,"$",1)
+		 && (strncmp(udv->udv_name,"ARG",3) || (strlen(udv->udv_name) != 4))
+		 && strncmp(udv->udv_name,"NaN",4)) {
+		    fprintf(fp, "%s = ", udv->udv_name);
+		    disp_value(fp, &(udv->udv_value), TRUE);
+		    (void) putc('\n', fp);
 	    }
 	}
 	udv = udv->next_udv;
     }
+}
+
+void
+save_array_content(FILE *fp, struct value *array)
+{
+    int i;
+    int size = array[0].v.int_val;
+    fprintf(fp, "[");
+    for (i=1; i<=size; i++) {
+	if (array[i].type != NOTDEFINED)
+	    disp_value(fp, &(array[i]), TRUE);
+	if (i < size)
+	    fprintf(fp, ",");
+    }
+    fprintf(fp, "]\n");
 }
 
 /* HBB 19990823: new function 'save term'. This will be mainly useful
@@ -219,12 +238,13 @@ save_set_all(FILE *fp)
     fprintf(fp, "\
 %sset clip points\n\
 %sset clip one\n\
-%sset clip two\n\
-set bar %f %s\n",
+%sset clip two\n",
 	    (clip_points) ? "" : "un",
 	    (clip_lines1) ? "" : "un",
-	    (clip_lines2) ? "" : "un",
-	    bar_size, (bar_layer == LAYER_BACK) ? "back" : "front");
+	    (clip_lines2) ? "" : "un"
+	    );
+
+    save_bars(fp);
 
     if (draw_border) {
 	fprintf(fp, "set border %d %s", draw_border,
@@ -234,9 +254,10 @@ set bar %f %s\n",
     } else
 	fputs("unset border\n", fp);
 
-    for (axis = FIRST_AXES; axis < LAST_REAL_AXIS; axis++) {
-	if (axis == SECOND_Z_AXIS) continue;
+    for (axis = 0; axis < NUMBER_OF_MAIN_VISIBLE_AXES; axis++) {
+	if (axis == SAMPLE_AXIS) continue;
 	if (axis == COLOR_AXIS) continue;
+	if (axis == POLAR_AXIS) continue;
 	fprintf(fp, "set %sdata %s\n", axis_name(axis),
 		axis_array[axis].datatype == DT_TIMEDATE ? "time" :
 		axis_array[axis].datatype == DT_DMS ? "geographic" :
@@ -264,12 +285,12 @@ set bar %f %s\n",
 
     /* Default circle properties */
     fprintf(fp, "set style circle radius ");
-    save_position(fp, &default_circle.o.circle.extent, FALSE);
+    save_position(fp, &default_circle.o.circle.extent, 1, FALSE);
     fputs(" \n", fp);
 
     /* Default ellipse properties */
     fprintf(fp, "set style ellipse size ");
-    save_position(fp, &default_ellipse.o.ellipse.extent, FALSE);
+    save_position(fp, &default_ellipse.o.ellipse.extent, 2, FALSE);
     fprintf(fp, " angle %g ", default_ellipse.o.ellipse.orientation);
     fputs("units ", fp);
     switch (default_ellipse.o.ellipse.type) {
@@ -286,12 +307,12 @@ set bar %f %s\n",
 #endif
 
     if (dgrid3d) {
-      if( dgrid3d_mode == DGRID3D_QNORM ) {
+      if (dgrid3d_mode == DGRID3D_QNORM) {
 	fprintf(fp, "set dgrid3d %d,%d, %d\n",
 	  	dgrid3d_row_fineness,
 	  	dgrid3d_col_fineness,
 	  	dgrid3d_norm_value);
-      } else if( dgrid3d_mode == DGRID3D_SPLINES ) {
+      } else if (dgrid3d_mode == DGRID3D_SPLINES) {
 	fprintf(fp, "set dgrid3d %d,%d splines\n",
 	  	dgrid3d_row_fineness, dgrid3d_col_fineness );
       } else {
@@ -314,20 +335,14 @@ set bar %f %s\n",
     }
     fprintf(fp, "\n");
 
-#define SAVE_FORMAT(axis)					\
-    fprintf(fp, "set format %s \"%s\" %s\n", axis_name(axis),	\
-	    conv_text(axis_array[axis].formatstring),		\
-	    axis_array[axis].tictype == DT_DMS ? "geographic" :	\
-	    axis_array[axis].tictype == DT_TIMEDATE ? "timedate" : \
-	    "");
-    SAVE_FORMAT(FIRST_X_AXIS );
-    SAVE_FORMAT(FIRST_Y_AXIS );
-    SAVE_FORMAT(SECOND_X_AXIS);
-    SAVE_FORMAT(SECOND_Y_AXIS);
-    SAVE_FORMAT(FIRST_Z_AXIS );
-    SAVE_FORMAT(COLOR_AXIS );
-    SAVE_FORMAT(POLAR_AXIS );
-#undef SAVE_FORMAT
+    save_axis_format(fp, FIRST_X_AXIS );
+    save_axis_format(fp, FIRST_Y_AXIS );
+    save_axis_format(fp, SECOND_X_AXIS);
+    save_axis_format(fp, SECOND_Y_AXIS);
+    save_axis_format(fp, FIRST_Z_AXIS );
+    save_axis_format(fp, COLOR_AXIS);
+    save_axis_format(fp, POLAR_AXIS);
+    fprintf(fp, "set ttics format \"%s\"\n", THETA_AXIS.formatstring);
 
     fprintf(fp, "set timefmt \"%s\"\n", timefmt);
 
@@ -354,6 +369,7 @@ set bar %f %s\n",
 	SAVE_GRID(FIRST_X_AXIS);
 	SAVE_GRID(FIRST_Y_AXIS);
 	SAVE_GRID(FIRST_Z_AXIS);
+	SAVE_GRID(POLAR_AXIS);
 	fputs(" \\\n", fp);
 	SAVE_GRID(SECOND_X_AXIS);
 	SAVE_GRID(SECOND_Y_AXIS);
@@ -361,13 +377,21 @@ set bar %f %s\n",
 	fputs("\n", fp);
 #undef SAVE_GRID
 
-	fprintf(fp, "set grid %s  ", (grid_layer==-1) ? "layerdefault" : ((grid_layer==0) ? "back" : "front"));
+	fprintf(fp, "set grid %s%s  ",
+		(grid_vertical_lines) ? "vertical " : "",
+		(grid_layer==-1) ? "layerdefault" : ((grid_layer==0) ? "back" : "front"));
 	save_linetype(fp, &grid_lp, FALSE);
 	fprintf(fp, ", ");
 	save_linetype(fp, &mgrid_lp, FALSE);
 	fputc('\n', fp);
     }
     fprintf(fp, "%sset raxis\n", raxis ? "" : "un");
+
+    /* Theta axis origin and direction */
+    fprintf(fp, "set theta %s %s\n",
+	theta_direction > 0 ? "counterclockwise" : "clockwise",
+	theta_origin == 180 ? "left" : theta_origin ==  90 ? "top" :
+	theta_origin == -90 ? "bottom" : "right");
 
     /* Save parallel axis state */
     save_style_parallel(fp);
@@ -381,7 +405,7 @@ set bar %f %s\n",
     fputs("set key ", fp);
     switch (key->region) {
 	case GPKEY_AUTO_INTERIOR_LRTBC:
-	    fputs("inside", fp);
+	    fputs(key->fixed ? "fixed" : "inside", fp);
 	    break;
 	case GPKEY_AUTO_EXTERIOR_LRTBC:
 	    fputs("outside", fp);
@@ -404,7 +428,7 @@ set bar %f %s\n",
 	    break;
 	case GPKEY_USER_PLACEMENT:
 	    fputs("at ", fp);
-	    save_position(fp, &key->user_pos, FALSE);
+	    save_position(fp, &key->user_pos, 2, FALSE);
 	    break;
     }
     if (!(key->region == GPKEY_AUTO_EXTERIOR_MARGIN
@@ -462,7 +486,7 @@ set bar %f %s\n",
 	fprintf(fp, "set label %d \"%s\" at ",
 		this_label->tag,
 		conv_text(this_label->text));
-	save_position(fp, &this_label->place, FALSE);
+	save_position(fp, &this_label->place, 3, FALSE);
 	if (this_label->hypertext)
 	    fprintf(fp, " hypertext");
 
@@ -483,7 +507,7 @@ set bar %f %s\n",
 	    fprintf(fp, " point");
 	    save_linetype(fp, &(this_label->lp_properties), TRUE);
 	}
-	save_position(fp, &this_label->offset, TRUE);
+	save_position(fp, &this_label->offset, 3, TRUE);
 #ifdef EAM_BOXED_TEXT
 	if (this_label->boxed)
 	    fprintf(fp," boxed ");
@@ -494,13 +518,13 @@ set bar %f %s\n",
     for (this_arrow = first_arrow; this_arrow != NULL;
 	 this_arrow = this_arrow->next) {
 	fprintf(fp, "set arrow %d from ", this_arrow->tag);
-	save_position(fp, &this_arrow->start, FALSE);
+	save_position(fp, &this_arrow->start, 3, FALSE);
 	if (this_arrow->type == arrow_end_absolute) {
 	    fputs(" to ", fp);
-	    save_position(fp, &this_arrow->end, FALSE);
+	    save_position(fp, &this_arrow->end, 3, FALSE);
 	} else if (this_arrow->type == arrow_end_absolute) {
 	    fputs(" rto ", fp);
-	    save_position(fp, &this_arrow->end, FALSE);
+	    save_position(fp, &this_arrow->end, 3, FALSE);
 	} else { /* type arrow_end_oriented */
 	    struct position *e = &this_arrow->end;
 	    fputs(" length ", fp);
@@ -570,25 +594,9 @@ set bar %f %s\n",
 #endif
 
 #ifdef EAM_BOXED_TEXT
-    fprintf(fp, "set style textbox %s margins %4.1f, %4.1f %s\n",
-	    textbox_opts.opaque ? "opaque": "transparent",
-	    textbox_opts.xmargin, textbox_opts.ymargin,
-	    textbox_opts.noborder ? "noborder" : "border");
+    fprintf(fp, "set style textbox");
+    save_style_textbox(fp);
 #endif
-
-    fputs("unset logscale\n", fp);
-#define SAVE_LOG(axis)							\
-    if (axis_array[axis].log)						\
-	fprintf(fp, "set logscale %s %g\n", axis_name(axis),	\
-		axis_array[axis].base);
-    SAVE_LOG(FIRST_X_AXIS );
-    SAVE_LOG(FIRST_Y_AXIS );
-    SAVE_LOG(SECOND_X_AXIS);
-    SAVE_LOG(SECOND_Y_AXIS);
-    SAVE_LOG(FIRST_Z_AXIS );
-    SAVE_LOG(COLOR_AXIS );
-    SAVE_LOG(POLAR_AXIS );
-#undef SAVE_LOG
 
     save_offsets(fp, "set offsets");
 
@@ -611,10 +619,8 @@ set encoding %s\n\
     if (!numeric_locale && !decimalsign)
 	fprintf(fp, "unset decimalsign\n");
 
-    if (use_minus_sign)
-	fprintf(fp, "set minussign\n");
-    else
-	fprintf(fp, "unset minussign\n");
+    fprintf(fp, "%sset micro\n", use_micro ? "" : "un");
+    fprintf(fp, "%sset minussign\n", use_minus_sign ? "" : "un");
 
     fputs("set view ", fp);
     if (splot_map == TRUE)
@@ -622,10 +628,13 @@ set encoding %s\n\
     else {
 	fprintf(fp, "%g, %g, %g, %g",
 	    surface_rot_x, surface_rot_z, surface_scale, surface_zscale);
+	fprintf(fp, "\nset view azimuth %g", azimuth);
     }
     if (aspect_ratio_3D)
 	fprintf(fp, "\nset view  %s", aspect_ratio_3D == 2 ? "equal xy" :
 			aspect_ratio_3D == 3 ? "equal xyz": "");
+
+    fprintf(fp, "\nset rgbmax %g", rgbmax);
 
     fprintf(fp, "\n\
 set samples %d, %d\n\
@@ -700,15 +709,14 @@ set isosamples %d, %d\n\
 	fputs("bspline\n", fp);
 	break;
     }
-    fputs("set cntrparam levels ", fp);
+    fprintf(fp, "set cntrparam levels %d\nset cntrparam levels ", contour_levels);
     switch (contour_levels_kind) {
     case LEVELS_AUTO:
-	fprintf(fp, "auto %d\n", contour_levels);
+	fprintf(fp, "auto");
 	break;
     case LEVELS_INCREMENTAL:
-	fprintf(fp, "incremental %g,%g,%g\n",
-		contour_levels_list[0], contour_levels_list[1],
-		contour_levels_list[0] + contour_levels_list[1] * contour_levels);
+	fprintf(fp, "incremental %g,%g",
+		contour_levels_list[0], contour_levels_list[1]);
 	break;
     case LEVELS_DISCRETE:
 	{
@@ -716,9 +724,10 @@ set isosamples %d, %d\n\
 	    fprintf(fp, "discrete %g", contour_levels_list[0]);
 	    for (i = 1; i < contour_levels; i++)
 		fprintf(fp, ",%g ", contour_levels_list[i]);
-	    fputc('\n', fp);
 	}
     }
+    fprintf(fp, "\nset cntrparam firstlinetype %d", contour_firstlinetype);
+    fprintf(fp, " %ssorted\n", contour_sortlevels ? "" : "un");
     fprintf(fp, "\
 set cntrparam points %d\n\
 set size ratio %g %g,%g\n\
@@ -750,52 +759,39 @@ set origin %g,%g\n",
 	fprintf(fp, " %g%c", ticscale[i], i<MAX_TICLEVEL-1 ? ',' : '\n');
     }
 
-#define SAVE_MINI(axis)							\
-    switch(axis_array[axis].minitics & TICS_MASK) {			\
-    case 0:								\
-	fprintf(fp, "set nom%stics\n", axis_name(axis));	\
-	break;								\
-    case MINI_AUTO:							\
-	fprintf(fp, "set m%stics\n", axis_name(axis));		\
-	break;								\
-    case MINI_DEFAULT:							\
-	fprintf(fp, "set m%stics default\n", axis_name(axis));	\
-	break;								\
-    case MINI_USER:							\
-	fprintf(fp, "set m%stics %f\n", axis_name(axis),	\
-		axis_array[axis].mtic_freq);				\
-	break;								\
-    }
+    save_mtics(fp, &axis_array[FIRST_X_AXIS]);
+    save_mtics(fp, &axis_array[FIRST_Y_AXIS]);
+    save_mtics(fp, &axis_array[FIRST_Z_AXIS]);
+    save_mtics(fp, &axis_array[SECOND_X_AXIS]);
+    save_mtics(fp, &axis_array[SECOND_Y_AXIS]);
+    save_mtics(fp, &axis_array[COLOR_AXIS]);
+    save_mtics(fp, &R_AXIS);
+    save_mtics(fp, &THETA_AXIS);
 
-    SAVE_MINI(FIRST_X_AXIS);
-    SAVE_MINI(FIRST_Y_AXIS);
-    SAVE_MINI(FIRST_Z_AXIS);	/* HBB 20000506: noticed mztics were not saved! */
-    SAVE_MINI(SECOND_X_AXIS);
-    SAVE_MINI(SECOND_Y_AXIS);
-    SAVE_MINI(COLOR_AXIS);
-    SAVE_MINI(POLAR_AXIS);
-#undef SAVE_MINI
+    save_tics(fp, &axis_array[FIRST_X_AXIS]);
+    save_tics(fp, &axis_array[FIRST_Y_AXIS]);
+    save_tics(fp, &axis_array[FIRST_Z_AXIS]);
+    save_tics(fp, &axis_array[SECOND_X_AXIS]);
+    save_tics(fp, &axis_array[SECOND_Y_AXIS]);
+    save_tics(fp, &axis_array[COLOR_AXIS]);
+    save_tics(fp, &R_AXIS);
+    save_tics(fp, &THETA_AXIS);
+    for (axis=0; axis<num_parallel_axes; axis++)
+	save_tics(fp, &parallel_axis[axis]);
 
-    save_tics(fp, FIRST_X_AXIS);
-    save_tics(fp, FIRST_Y_AXIS);
-    save_tics(fp, FIRST_Z_AXIS);
-    save_tics(fp, SECOND_X_AXIS);
-    save_tics(fp, SECOND_Y_AXIS);
-    save_tics(fp, COLOR_AXIS);
-    save_tics(fp, POLAR_AXIS);
-    for (axis=0; axis<MAX_PARALLEL_AXES; axis++)
-	save_tics(fp, PARALLEL_AXES+axis);
-
-#define SAVE_AXISLABEL_OR_TITLE(name,suffix,lab)			 \
+#define SAVE_AXISLABEL_OR_TITLE(name,suffix,lab,savejust)		 \
     {									 \
 	fprintf(fp, "set %s%s \"%s\" ",					 \
 		name, suffix, lab.text ? conv_text(lab.text) : "");	 \
 	fprintf(fp, "\nset %s%s ", name, suffix);			 \
-	save_position(fp, &(lab.offset), TRUE);				 \
+	save_position(fp, &(lab.offset), 3, TRUE);			 \
 	fprintf(fp, " font \"%s\"", lab.font ? conv_text(lab.font) : "");\
 	save_textcolor(fp, &(lab.textcolor));				 \
+	if (savejust && (lab.pos != CENTRE)) save_justification(lab.pos,fp); \
 	if (lab.tag == ROTATE_IN_3D_LABEL_TAG)				 \
 	    fprintf(fp, " rotate parallel");				 \
+	else if (lab.rotate == TEXT_VERTICAL)				 \
+	    fprintf(fp, " rotate");					 \
 	else if (lab.rotate)						 \
 	    fprintf(fp, " rotate by %d", lab.rotate);			 \
 	else								 \
@@ -803,42 +799,59 @@ set origin %g,%g\n",
 	fprintf(fp, "%s\n", (lab.noenhanced) ? " noenhanced" : "");	 \
     }
 
-    SAVE_AXISLABEL_OR_TITLE("", "title", title);
+    SAVE_AXISLABEL_OR_TITLE("", "title", title, TRUE);
 
     /* FIXME */
     fprintf(fp, "set timestamp %s \n", timelabel_bottom ? "bottom" : "top");
-    SAVE_AXISLABEL_OR_TITLE("", "timestamp", timelabel);
+    SAVE_AXISLABEL_OR_TITLE("", "timestamp", timelabel, FALSE);
 
-    save_range(fp, POLAR_AXIS);
-    save_range(fp, T_AXIS);
-    save_range(fp, U_AXIS);
-    save_range(fp, V_AXIS);
+    save_prange(fp, axis_array + T_AXIS);
+    save_prange(fp, axis_array + U_AXIS);
+    save_prange(fp, axis_array + V_AXIS);
 
 #define SAVE_AXISLABEL(axis)					\
     SAVE_AXISLABEL_OR_TITLE(axis_name(axis),"label",	\
-			    axis_array[axis].label)
+			    axis_array[axis].label, TRUE)
 
     SAVE_AXISLABEL(FIRST_X_AXIS);
     SAVE_AXISLABEL(SECOND_X_AXIS);
-    save_range(fp, FIRST_X_AXIS);
-    save_range(fp, SECOND_X_AXIS);
+    save_prange(fp, axis_array + FIRST_X_AXIS);
+    save_prange(fp, axis_array + SECOND_X_AXIS);
 
     SAVE_AXISLABEL(FIRST_Y_AXIS);
     SAVE_AXISLABEL(SECOND_Y_AXIS);
-    save_range(fp, FIRST_Y_AXIS);
-    save_range(fp, SECOND_Y_AXIS);
+    save_prange(fp, axis_array + FIRST_Y_AXIS);
+    save_prange(fp, axis_array + SECOND_Y_AXIS);
 
     SAVE_AXISLABEL(FIRST_Z_AXIS);
-    save_range(fp, FIRST_Z_AXIS);
+    save_prange(fp, axis_array + FIRST_Z_AXIS);
 
     SAVE_AXISLABEL(COLOR_AXIS);
-    save_range(fp, COLOR_AXIS);
+    save_prange(fp, axis_array + COLOR_AXIS);
 
-    for (axis=0; axis<MAX_PARALLEL_AXES; axis++)
-	save_range(fp, PARALLEL_AXES+axis);
+    SAVE_AXISLABEL(POLAR_AXIS);
+    save_prange(fp, axis_array + POLAR_AXIS);
+
+    for (axis=0; axis<num_parallel_axes; axis++)
+	save_prange(fp, &parallel_axis[axis]);
 
 #undef SAVE_AXISLABEL
 #undef SAVE_AXISLABEL_OR_TITLE
+
+    fputs("unset logscale\n", fp);
+    for (axis = 0; axis < NUMBER_OF_MAIN_VISIBLE_AXES; axis++) {
+	if (axis_array[axis].log)
+	    fprintf(fp, "set logscale %s %g\n", axis_name(axis),
+		axis_array[axis].base);
+	else
+	    save_nonlinear(fp, &axis_array[axis]);
+    }
+
+    /* These will only print something if the axis is, in fact, linked */    
+    save_link(fp, axis_array + SECOND_X_AXIS);
+    save_link(fp, axis_array + SECOND_Y_AXIS);
+
+    save_jitter(fp);
 
     fprintf(fp, "set zero %g\n", zero);
 
@@ -853,6 +866,7 @@ set origin %g,%g\n",
 
     fprintf(fp, "set locale \"%s\"\n", get_time_locale());
 
+    /* pm3d options */
     fputs("set pm3d ", fp);
     fputs((PM3D_IMPLICIT == pm3d.implicit ? "implicit" : "explicit"), fp);
     fprintf(fp, " at %s\n", pm3d.where);
@@ -861,7 +875,7 @@ set origin %g,%g\n",
     case PM3D_SCANS_AUTOMATIC: fputs("scansautomatic\n", fp); break;
     case PM3D_SCANS_FORWARD: fputs("scansforward\n", fp); break;
     case PM3D_SCANS_BACKWARD: fputs("scansbackward\n", fp); break;
-    case PM3D_DEPTH: fputs("depthorder\n", fp); break;
+    case PM3D_DEPTH: fprintf(fp, "depthorder %s\n", pm3d.base_sort ? "base" : ""); break;
     }
     fprintf(fp, "set pm3d interpolate %d,%d", pm3d.interp_i, pm3d.interp_j);
     fputs(" flush ", fp);
@@ -893,6 +907,17 @@ set origin %g,%g\n",
     }
     fputs("\n", fp);
 
+#if (0)
+    fprintf(fp, "set pm3d %s %s\n",
+		pm3d.clip == PM3D_CLIP_1IN ? "clip1in" : "clip4in",
+		pm3d.no_clipcb ? "noclipcb" : "");
+#endif
+
+    if (pm3d_shade.strength <= 0)
+	fputs("set pm3d nolighting\n",fp);
+    else
+	fprintf(fp, "set pm3d lighting primary %g specular %g\n", pm3d_shade.strength, pm3d_shade.spec);
+
     /*
      *  Save palette information
      */
@@ -908,17 +933,14 @@ set origin %g,%g\n",
     else {
       fputs( "color model ", fp );
       switch( sm_palette.cmodel ) {
+	default:
 	case C_MODEL_RGB: fputs( "RGB ", fp ); break;
 	case C_MODEL_HSV: fputs( "HSV ", fp ); break;
 	case C_MODEL_CMY: fputs( "CMY ", fp ); break;
-	case C_MODEL_YIQ: fputs( "YIQ ", fp ); break;
-	case C_MODEL_XYZ: fputs( "XYZ ", fp ); break;
-	default:
-	  fprintf( stderr, "%s:%d ooops: Unknown color model '%c'.\n",
-		   __FILE__, __LINE__, (char)(sm_palette.cmodel) );
       }
       fputs( "\nset palette ", fp );
       switch( sm_palette.colorMode ) {
+      default:
       case SMPAL_COLOR_MODE_RGB:
 	fprintf( fp, "rgbformulae %d, %d, %d\n", sm_palette.formulaR,
 		 sm_palette.formulaG, sm_palette.formulaB );
@@ -926,7 +948,7 @@ set origin %g,%g\n",
       case SMPAL_COLOR_MODE_GRADIENT: {
 	int i=0;
 	fprintf( fp, "defined (" );
-	for( i=0; i<sm_palette.gradient_num; ++i ) {
+	for (i=0; i<sm_palette.gradient_num; i++) {
 	  fprintf( fp, " %.4g %.4g %.4g %.4g", sm_palette.gradient[i].pos,
 		   sm_palette.gradient[i].col.r, sm_palette.gradient[i].col.g,
 		   sm_palette.gradient[i].col.b );
@@ -947,9 +969,6 @@ set origin %g,%g\n",
 		sm_palette.cubehelix_start, sm_palette.cubehelix_cycles,
 		sm_palette.cubehelix_saturation);
 	break;
-      default:
-	fprintf( stderr, "%s:%d ooops: Unknown color mode '%c'.\n",
-		 __FILE__, __LINE__, (char)(sm_palette.colorMode) );
       }
     }
 
@@ -959,9 +978,9 @@ set origin %g,%g\n",
     if (color_box.where != SMCOLOR_BOX_NO)
 	fprintf(fp,"set colorbox %s\n", color_box.where==SMCOLOR_BOX_DEFAULT ? "default" : "user");
     fprintf(fp, "set colorbox %sal origin ", color_box.rotation ==  'v' ? "vertic" : "horizont");
-    save_position(fp, &color_box.origin, FALSE);
+    save_position(fp, &color_box.origin, 2, FALSE);
     fputs(" size ", fp);
-    save_position(fp, &color_box.size, FALSE);
+    save_position(fp, &color_box.size, 2, FALSE);
     fprintf(fp, " %s ", color_box.layer ==  LAYER_FRONT ? "front" : "back");
     fprintf(fp, " %sinvert ", color_box.invert ? "" : "no");
     if (color_box.border == 0) fputs("noborder", fp);
@@ -1035,7 +1054,7 @@ set origin %g,%g\n",
 	int i;
 
 	v = get_udv_by_name((char *)FITLIMIT);
-	d = ((v != NULL) && (!v->udv_undef)) ? real(&(v->udv_value)) : -1.0;
+	d = ((v != NULL) && (v->udv_value.type != NOTDEFINED)) ? real(&(v->udv_value)) : -1.0;
 	if ((d > 0.) && (d < 1.))
 	    fprintf(fp, " limit %g", d);
 
@@ -1043,17 +1062,17 @@ set origin %g,%g\n",
 	    fprintf(fp, " limit_abs %g", epsilon_abs);
 
 	v = get_udv_by_name((char *)FITMAXITER);
-	i = ((v != NULL) && (!v->udv_undef)) ? real_int(&(v->udv_value)) : -1;
+	i = ((v != NULL) && (v->udv_value.type != NOTDEFINED)) ? real_int(&(v->udv_value)) : -1;
 	if (i > 0)
 	    fprintf(fp, " maxiter %i", i);
 
 	v = get_udv_by_name((char *)FITSTARTLAMBDA);
-	d = ((v != NULL) && (!v->udv_undef)) ? real(&(v->udv_value)) : -1.0;
+	d = ((v != NULL) && (v->udv_value.type != NOTDEFINED)) ? real(&(v->udv_value)) : -1.0;
 	if (d > 0.)
 	    fprintf(fp, " start_lambda %g", d);
 
 	v = get_udv_by_name((char *)FITLAMBDAFACTOR);
-	d = ((v != NULL) && (!v->udv_undef)) ? real(&(v->udv_value)) : -1.0;
+	d = ((v != NULL) && (v->udv_value.type != NOTDEFINED)) ? real(&(v->udv_value)) : -1.0;
 	if (d > 0.)
 	    fprintf(fp, " lambda_factor %g", d);
     }
@@ -1069,85 +1088,88 @@ set origin %g,%g\n",
 
 
 static void
-save_tics(FILE *fp, AXIS_INDEX axis)
+save_tics(FILE *fp, struct axis *this_axis)
 {
-    if ((axis_array[axis].ticmode & TICS_MASK) == NO_TICS) {
-	fprintf(fp, "unset %stics\n", axis_name(axis));
+    if ((this_axis->ticmode & TICS_MASK) == NO_TICS) {
+	fprintf(fp, "unset %stics\n", axis_name(this_axis->index));
 	return;
     }
     fprintf(fp, "set %stics %s %s scale %g,%g %smirror %s ",
-	    axis_name(axis),
-	    ((axis_array[axis].ticmode & TICS_MASK) == TICS_ON_AXIS)
+	    axis_name(this_axis->index),
+	    ((this_axis->ticmode & TICS_MASK) == TICS_ON_AXIS)
 	    ? "axis" : "border",
-	    (axis_array[axis].tic_in) ? "in" : "out",
-	    axis_array[axis].ticscale, axis_array[axis].miniticscale,
-	    (axis_array[axis].ticmode & TICS_MIRROR) ? "" : "no",
-	    axis_array[axis].tic_rotate ? "rotate" : "norotate");
-    if (axis_array[axis].tic_rotate)
-    	fprintf(fp,"by %d ",axis_array[axis].tic_rotate);
-    save_position(fp, &axis_array[axis].ticdef.offset, TRUE);
-    if (axis_array[axis].manual_justify)
-	save_justification(axis_array[axis].label.pos, fp);
+	    (this_axis->tic_in) ? "in" : "out",
+	    this_axis->ticscale, this_axis->miniticscale,
+	    (this_axis->ticmode & TICS_MIRROR) ? "" : "no",
+	    this_axis->tic_rotate ? "rotate" : "norotate");
+    if (this_axis->tic_rotate)
+	fprintf(fp,"by %d ",this_axis->tic_rotate);
+    save_position(fp, &this_axis->ticdef.offset, 3, TRUE);
+    if (this_axis->manual_justify)
+	save_justification(this_axis->tic_pos, fp);
     else
 	fputs(" autojustify", fp);
-    fprintf(fp, "\nset %stics ", axis_name(axis));
+    fprintf(fp, "\nset %stics ", axis_name(this_axis->index));
 
-    fprintf(fp, (axis_array[axis].ticdef.rangelimited)?" rangelimit ":" norangelimit ");
+    fprintf(fp, (this_axis->ticdef.rangelimited)?" rangelimit ":" norangelimit ");
 
-    switch (axis_array[axis].ticdef.type) {
+    if (this_axis->ticdef.logscaling)
+	fputs("logscale ", fp);
+
+    switch (this_axis->ticdef.type) {
     case TIC_COMPUTED:{
 	    fputs("autofreq ", fp);
 	    break;
 	}
     case TIC_MONTH:{
-	    fprintf(fp, "\nset %smtics", axis_name(axis));
+	    fprintf(fp, "\nset %smtics", axis_name(this_axis->index));
 	    break;
 	}
     case TIC_DAY:{
-	    fprintf(fp, "\nset %sdtics", axis_name(axis));
+	    fprintf(fp, "\nset %sdtics", axis_name(this_axis->index));
 	    break;
 	}
     case TIC_SERIES:
-	if (axis_array[axis].ticdef.def.series.start != -VERYLARGE) {
+	if (this_axis->ticdef.def.series.start != -VERYLARGE) {
 	    save_num_or_time_input(fp,
-			     (double) axis_array[axis].ticdef.def.series.start,
-			     axis);
+			     (double) this_axis->ticdef.def.series.start,
+			     this_axis);
 	    putc(',', fp);
 	}
-	fprintf(fp, "%g", axis_array[axis].ticdef.def.series.incr);
-	if (axis_array[axis].ticdef.def.series.end != VERYLARGE) {
+	fprintf(fp, "%g", this_axis->ticdef.def.series.incr);
+	if (this_axis->ticdef.def.series.end != VERYLARGE) {
 	    putc(',', fp);
 	    save_num_or_time_input(fp,
-			     (double) axis_array[axis].ticdef.def.series.end,
-			     axis);
+			     (double) this_axis->ticdef.def.series.end,
+			     this_axis);
 	}
 	break;
     case TIC_USER:
 	break;
     }
 
-    if (axis_array[axis].ticdef.font && *axis_array[axis].ticdef.font)
-	fprintf(fp, " font \"%s\"", axis_array[axis].ticdef.font);
+    if (this_axis->ticdef.font && *this_axis->ticdef.font)
+	fprintf(fp, " font \"%s\"", this_axis->ticdef.font);
 
-    if (axis_array[axis].ticdef.enhanced == FALSE)
+    if (this_axis->ticdef.enhanced == FALSE)
 	fprintf(fp, " noenhanced");
 
-    if (axis_array[axis].ticdef.textcolor.type != TC_DEFAULT)
-	save_textcolor(fp, &axis_array[axis].ticdef.textcolor);
+    if (this_axis->ticdef.textcolor.type != TC_DEFAULT)
+	save_textcolor(fp, &this_axis->ticdef.textcolor);
 
     putc('\n', fp);
 
-    if (axis_array[axis].ticdef.def.user) {
+    if (this_axis->ticdef.def.user) {
 	struct ticmark *t;
-	fprintf(fp, "set %stics %s ", axis_name(axis),
-		(axis_array[axis].ticdef.type == TIC_USER) ? "" : "add");
+	fprintf(fp, "set %stics %s ", axis_name(this_axis->index),
+		(this_axis->ticdef.type == TIC_USER) ? "" : "add");
 	fputs(" (", fp);
-	for (t = axis_array[axis].ticdef.def.user; t != NULL; t = t->next) {
+	for (t = this_axis->ticdef.def.user; t != NULL; t = t->next) {
 	    if (t->level < 0)	/* Don't save ticlabels read from data file */
 		continue;
 	    if (t->label)
 		fprintf(fp, "\"%s\" ", conv_text(t->label));
-	    save_num_or_time_input(fp, (double) t->position, axis);
+	    save_num_or_time_input(fp, (double) t->position, this_axis);
 	    if (t->level)
 		fprintf(fp, " %d", t->level);
 	    if (t->next) {
@@ -1159,10 +1181,31 @@ save_tics(FILE *fp, AXIS_INDEX axis)
 
 }
 
-void
-save_num_or_time_input(FILE *fp, double x, AXIS_INDEX axis)
+static void
+save_mtics(FILE *fp, struct axis *axis)
 {
-    if (axis_array[axis].datatype == DT_TIMEDATE) {
+    char *name = axis_name(axis->index);
+
+    switch(axis->minitics & TICS_MASK) {
+    case 0:
+	fprintf(fp, "set nom%stics\n", name);
+	break;
+    case MINI_AUTO:
+	fprintf(fp, "set m%stics\n", name);
+	break;
+    case MINI_DEFAULT:
+	fprintf(fp, "set m%stics default\n", name);
+	break;
+    case MINI_USER:
+	fprintf(fp, "set m%stics %f\n", name, axis->mtic_freq);
+	break;
+    }
+}
+
+void
+save_num_or_time_input(FILE *fp, double x, struct axis *this_axis)
+{
+    if (this_axis->datatype == DT_TIMEDATE) {
 	char s[80];
 
 	putc('"', fp);
@@ -1175,20 +1218,52 @@ save_num_or_time_input(FILE *fp, double x, AXIS_INDEX axis)
 }
 
 void
+save_axis_format(FILE *fp, AXIS_INDEX axis)
+{
+    fprintf(fp, 
+	    (fp == stderr) ? "\t  %s-axis: \"%s\"%s\n" : "set format %s \"%s\" %s\n",
+	     axis_name(axis), conv_text(axis_array[axis].formatstring),
+	    axis_array[axis].tictype == DT_DMS ? "geographic" :
+	    axis_array[axis].tictype == DT_TIMEDATE ? "timedate" :
+	    "");
+}
+
+void
 save_style_parallel(FILE *fp)
 {
+    if (fp == stderr)
+	fputs("\t",fp);
     fprintf(fp, "set style parallel %s ",
-	    parallel_axis_style.layer == LAYER_BACK ? "back" : "front");
+	parallel_axis_style.layer == LAYER_BACK ? "back" : "front");
     save_linetype(fp, &(parallel_axis_style.lp_properties), FALSE);
     fprintf(fp, "\n");
 }
 
+#ifdef EAM_BOXED_TEXT
 void
-save_position(FILE *fp, struct position *pos, TBOOLEAN offset)
+save_style_textbox(FILE *fp)
 {
-    assert(first_axes == 0 && second_axes == 1 && graph == 2 && screen == 3 &&
-	   character == 4);
+    fprintf(fp, " %s margins %4.1f, %4.1f",
+	    textbox_opts.opaque ? "opaque": "transparent",
+	    textbox_opts.xmargin, textbox_opts.ymargin);
+    if (textbox_opts.opaque) {
+	fprintf(fp, " fc ");
+	save_pm3dcolor(fp, &(textbox_opts.fillcolor));
+    }
+    if (textbox_opts.noborder) {
+	fprintf(fp, " noborder");
+    } else {
+	fprintf(fp, " border ");
+	save_pm3dcolor(fp, &(textbox_opts.border_color));
+    }
+    fprintf(fp, " linewidth %4.1f", textbox_opts.linewidth);
+    fputs("\n",fp);
+}
+#endif
 
+void
+save_position(FILE *fp, struct position *pos, int ndim, TBOOLEAN offset)
+{
     if (offset) {
 	if (pos->x == 0 && pos->y == 0 && pos->z == 0)
 	    return;
@@ -1197,107 +1272,135 @@ save_position(FILE *fp, struct position *pos, TBOOLEAN offset)
 
     /* Save in time coordinates if appropriate */
     if (pos->scalex == first_axes) {
-	save_num_or_time_input(fp, pos->x, FIRST_X_AXIS);
-	fprintf(fp, ", ");
+	save_num_or_time_input(fp, pos->x, &axis_array[FIRST_X_AXIS]);
     } else {
-	fprintf(fp, "%s%g, ", coord_msg[pos->scalex], pos->x);
+	fprintf(fp, "%s%g", coord_msg[pos->scalex], pos->x);
     }
 
-    if (pos->scaley == first_axes) {
-	if (pos->scaley != pos->scalex) fprintf(fp, "first ");
-	save_num_or_time_input(fp, pos->y, FIRST_Y_AXIS);
+    if (ndim == 1)
+	return;
+    else
 	fprintf(fp, ", ");
+
+    if (pos->scaley == first_axes || pos->scalex == polar_axes) {
+	if (pos->scaley != pos->scalex) fprintf(fp, "first ");
+	save_num_or_time_input(fp, pos->y, &axis_array[FIRST_Y_AXIS]);
     } else {
-	fprintf(fp, "%s%g, ", 
+	fprintf(fp, "%s%g", 
 	    pos->scaley == pos->scalex ? "" : coord_msg[pos->scaley], pos->y);
     }
 
+    if (ndim == 2)
+	return;
+    else
+	fprintf(fp, ", ");
+
     if (pos->scalez == first_axes) {
 	if (pos->scalez != pos->scaley) fprintf(fp, "first ");
-	save_num_or_time_input(fp, pos->z, FIRST_Z_AXIS);
+	save_num_or_time_input(fp, pos->z, &axis_array[FIRST_Z_AXIS]);
     } else {
 	fprintf(fp, "%s%g", 
 	    pos->scalez == pos->scaley ? "" : coord_msg[pos->scalez], pos->z);
     }
-#if (0) /* v4 code */
-    fprintf(fp, "%s%g, %s%g, %s%g",
-	    pos->scalex == first_axes ? "" : coord_msg[pos->scalex], pos->x,
-	    pos->scaley == pos->scalex ? "" : coord_msg[pos->scaley], pos->y,
-	    pos->scalez == pos->scaley ? "" : coord_msg[pos->scalez], pos->z);
-#endif
 }
 
 
 void
-save_range(FILE *fp, AXIS_INDEX axis)
+save_prange(FILE *fp, struct axis *this_axis)
 {
-    if (axis_array[axis].linked_to_primary) {
-	fprintf(fp, "set link %c2 ", axis_name(axis)[0]);
-	if (axis_array[axis].link_udf->at)
-	    fprintf(fp, "via %s ", axis_array[axis].link_udf->definition);
-	if (axis_array[axis-SECOND_AXES].link_udf->at)
-	    fprintf(fp, "inverse %s ", axis_array[axis-SECOND_AXES].link_udf->definition);
-	fputs("\n\t", fp);
-    }
-
-    fprintf(fp, "set %srange [ ", axis_name(axis));
-    if (axis_array[axis].set_autoscale & AUTOSCALE_MIN) {
-	if (axis_array[axis].min_constraint & CONSTRAINT_LOWER ) {
-	    save_num_or_time_input(fp, axis_array[axis].min_lb, axis);
+    fprintf(fp, "set %srange [ ", axis_name(this_axis->index));
+    if (this_axis->set_autoscale & AUTOSCALE_MIN) {
+	if (this_axis->min_constraint & CONSTRAINT_LOWER ) {
+	    save_num_or_time_input(fp, this_axis->min_lb, this_axis);
 	    fputs(" < ", fp);
 	}
 	putc('*', fp);
-	if (axis_array[axis].min_constraint & CONSTRAINT_UPPER ) {
+	if (this_axis->min_constraint & CONSTRAINT_UPPER ) {
 	    fputs(" < ", fp);
-	    save_num_or_time_input(fp, axis_array[axis].min_ub, axis);
+	    save_num_or_time_input(fp, this_axis->min_ub, this_axis);
 	}
     } else {
-	save_num_or_time_input(fp, axis_array[axis].set_min, axis);
+	save_num_or_time_input(fp, this_axis->set_min, this_axis);
     }
     fputs(" : ", fp);
-    if (axis_array[axis].set_autoscale & AUTOSCALE_MAX) {
-	if (axis_array[axis].max_constraint & CONSTRAINT_LOWER ) {
-	    save_num_or_time_input(fp, axis_array[axis].max_lb, axis);
+    if (this_axis->set_autoscale & AUTOSCALE_MAX) {
+	if (this_axis->max_constraint & CONSTRAINT_LOWER ) {
+	    save_num_or_time_input(fp, this_axis->max_lb, this_axis);
 	    fputs(" < ", fp);
 	}
 	putc('*', fp);
-	if (axis_array[axis].max_constraint & CONSTRAINT_UPPER ) {
+	if (this_axis->max_constraint & CONSTRAINT_UPPER ) {
 	    fputs(" < ", fp);
-	    save_num_or_time_input(fp, axis_array[axis].max_ub, axis);
+	    save_num_or_time_input(fp, this_axis->max_ub, this_axis);
 	}
     } else {
-	save_num_or_time_input(fp, axis_array[axis].set_max, axis);
+	save_num_or_time_input(fp, this_axis->set_max, this_axis);
     }
 
     fprintf(fp, " ] %sreverse %swriteback",
-	    ((axis_array[axis].range_flags & RANGE_IS_REVERSED)) ? "" : "no",
-	    axis_array[axis].range_flags & RANGE_WRITEBACK ? "" : "no");
+	    ((this_axis->range_flags & RANGE_IS_REVERSED)) ? "" : "no",
+	    this_axis->range_flags & RANGE_WRITEBACK ? "" : "no");
 
-    if (axis >= PARALLEL_AXES) {
+    if (this_axis->index >= PARALLEL_AXES) {
 	fprintf(fp, "\n");
 	return;
     }
 
-    if (axis_array[axis].set_autoscale && fp == stderr) {
+    if (this_axis->set_autoscale && fp == stderr) {
 	/* add current (hidden) range as comments */
 	fputs("  # (currently [", fp);
-	if (axis_array[axis].set_autoscale & AUTOSCALE_MIN) {
-	    save_num_or_time_input(fp, axis_array[axis].min, axis);
+	if (this_axis->set_autoscale & AUTOSCALE_MIN) {
+	    save_num_or_time_input(fp, this_axis->min, this_axis);
 	}
 	putc(':', fp);
-	if (axis_array[axis].set_autoscale & AUTOSCALE_MAX) {
-	    save_num_or_time_input(fp, axis_array[axis].max, axis);
+	if (this_axis->set_autoscale & AUTOSCALE_MAX) {
+	    save_num_or_time_input(fp, this_axis->max, this_axis);
 	}
 	fputs("] )\n", fp);
     } else
 	putc('\n', fp);
 
     if (fp != stderr) {
-	if (axis_array[axis].set_autoscale & (AUTOSCALE_FIXMIN))
-	    fprintf(fp, "set autoscale %sfixmin\n", axis_name(axis));
-	if (axis_array[axis].set_autoscale & AUTOSCALE_FIXMAX)
-	    fprintf(fp, "set autoscale %sfixmax\n", axis_name(axis));
+	if (this_axis->set_autoscale & (AUTOSCALE_FIXMIN))
+	    fprintf(fp, "set autoscale %sfixmin\n", axis_name(this_axis->index));
+	if (this_axis->set_autoscale & AUTOSCALE_FIXMAX)
+	    fprintf(fp, "set autoscale %sfixmax\n", axis_name(this_axis->index));
     }
+}
+
+void
+save_link(FILE *fp, AXIS *this_axis)
+{
+    if (this_axis->linked_to_primary
+    &&  this_axis->index != -this_axis->linked_to_primary->index) {
+	fprintf(fp, "set link %s ", axis_name(this_axis->index));
+	if (this_axis->link_udf->at)
+	    fprintf(fp, "via %s ", this_axis->link_udf->definition);
+	if (this_axis->linked_to_primary->link_udf->at)
+	    fprintf(fp, "inverse %s ", this_axis->linked_to_primary->link_udf->definition);
+	fputs("\n", fp);
+    }
+}
+
+void
+save_nonlinear(FILE *fp, AXIS *this_axis)
+{
+#ifdef NONLINEAR_AXES
+    AXIS *primary = this_axis->linked_to_primary;
+
+    if (primary &&  this_axis->index == -primary->index) {
+	fprintf(fp, "set nonlinear %s ", axis_name(this_axis->index));
+	if (primary->link_udf->at)
+	    fprintf(fp, "via %s ", primary->link_udf->definition);
+	else
+	    fprintf(stderr, "[corrupt linkage] ");
+	if (this_axis->link_udf->at)
+	    fprintf(fp, "inverse %s ", this_axis->link_udf->definition);
+	else
+	    fprintf(stderr, "[corrupt linkage] ");
+	fputs("\n", fp);
+    }
+#endif
 }
 
 static void
@@ -1351,9 +1454,9 @@ save_textcolor(FILE *fp, const struct t_colorspec *tc)
     if (tc->type) {
 	fprintf(fp, " textcolor");
 	if (tc->type == TC_VARIABLE)
-	   fprintf(fp, " variable");
+	    fprintf(fp, " variable");
 	else
-	   save_pm3dcolor(fp, tc);
+	    save_pm3dcolor(fp, tc);
     }
 }
 
@@ -1384,9 +1487,9 @@ save_pm3dcolor(FILE *fp, const struct t_colorspec *tc)
 		  	fprintf(fp," rgb variable ");
 		      else if (color)
 	    		fprintf(fp," rgb \"%s\" ", color);
-    		      else
+		      else
 	    		fprintf(fp," rgb \"#%6.6x\" ", tc->lt);
-    		      break;
+		      break;
 	    	      }
 	default:      break;
 	}
@@ -1448,7 +1551,7 @@ save_data_func_style(FILE *fp, const char *which, enum PLOT_STYLE style)
 	fputs("boxerrorbars\n", fp);
 	break;
     case BOXXYERROR:
-	fputs("boxxyerrorbars\n", fp);
+	fputs("boxxyerror\n", fp);
 	break;
     case STEPS:
 	fputs("steps\n", fp);
@@ -1503,7 +1606,8 @@ save_data_func_style(FILE *fp, const char *which, enum PLOT_STYLE style)
     }
 }
 
-void save_dashtype(FILE *fp, int d_type, const t_dashtype *dt)
+void
+save_dashtype(FILE *fp, int d_type, const t_dashtype *dt)
 {
     /* this is indicated by LT_AXIS (lt 0) instead */
     if (d_type == DASHTYPE_AXIS)
@@ -1532,21 +1636,23 @@ save_linetype(FILE *fp, lp_style_type *lp, TBOOLEAN show_point)
 {
     if (lp->l_type == LT_NODRAW)
 	fprintf(fp, " lt nodraw");
-    else if (lp->l_type == LT_BLACK)
-	fprintf(fp, " lt black");
     else if (lp->l_type == LT_BACKGROUND)
 	fprintf(fp, " lt bgnd");
-    else if (lp->l_type < 0)
-	fprintf(fp, " lt %d", lp->l_type+1);
+    else if (lp->l_type == LT_DEFAULT)
+	; /* Dont' print anything */
+    else if (lp->l_type == LT_AXIS)
+	fprintf(fp, " lt 0");
 
+    if (lp->l_type == LT_BLACK && lp->pm3d_color.type == TC_LT)
+	fprintf(fp, " lt black");
     else if (lp->pm3d_color.type != TC_DEFAULT) {
 	fprintf(fp, " linecolor");
 	if (lp->pm3d_color.type == TC_LT)
-    	    fprintf(fp, " %d", lp->pm3d_color.lt+1);
+	    fprintf(fp, " %d", lp->pm3d_color.lt+1);
 	else if (lp->pm3d_color.type == TC_LINESTYLE && lp->l_type == LT_COLORFROMCOLUMN)
 	    fprintf(fp, " variable");
 	else
-    	    save_pm3dcolor(fp,&(lp->pm3d_color));
+	    save_pm3dcolor(fp,&(lp->pm3d_color));
     }
     fprintf(fp, " linewidth %.3f", lp->l_width);
 
@@ -1554,7 +1660,9 @@ save_linetype(FILE *fp, lp_style_type *lp, TBOOLEAN show_point)
 
     if (show_point) {
 	if (lp->p_type == PT_CHARACTER)
-	    fprintf(fp, " pointtype \"%s\"", (char *)(&lp->p_char));
+	    fprintf(fp, " pointtype \"%s\"", lp->p_char);
+	else if (lp->p_type == PT_VARIABLE)
+	    fprintf(fp, " pointtype variable");
 	else
 	    fprintf(fp, " pointtype %d", lp->p_type + 1);
 	if (lp->p_size == PTSZ_VARIABLE)
@@ -1563,7 +1671,10 @@ save_linetype(FILE *fp, lp_style_type *lp, TBOOLEAN show_point)
 	    fprintf(fp, " pointsize default");
 	else
 	    fprintf(fp, " pointsize %.3f", lp->p_size);
-	fprintf(fp, " pointinterval %d", lp->p_interval);
+	if (lp->p_interval != 0)
+	    fprintf(fp, " pointinterval %d", lp->p_interval);
+	if (lp->p_number != 0)
+	    fprintf(fp, " pointnumber %d", lp->p_number);
     }
 
 }
@@ -1577,6 +1688,23 @@ save_offsets(FILE *fp, char *lead)
 	roff.scalex == graph ? "graph " : "", roff.x,
 	toff.scaley == graph ? "graph " : "", toff.y,
 	boff.scaley == graph ? "graph " : "", boff.y);
+}
+
+void
+save_bars(FILE *fp)
+{
+    if (bar_size == 0.0) {
+	fprintf(fp, "unset errorbars\n");
+	return;
+    }
+    fprintf(fp, "set errorbars %s", (bar_layer == LAYER_BACK) ? "back" : "front");
+    if (bar_size > 0.0)
+	fprintf(fp, " %f ", bar_size);
+    else
+	fprintf(fp," fullwidth ");
+    if ((bar_lp.flags & LP_ERRORBAR_SET) != 0)
+	save_linetype(fp, &bar_lp, FALSE);
+    fputs("\n",fp);
 }
 
 void 
@@ -1599,7 +1727,7 @@ save_histogram_opts (FILE *fp)
     save_textcolor(fp, &histogram_opts.title.textcolor);
     if (histogram_opts.title.font)
 	fprintf(fp, " font \"%s\" ", histogram_opts.title.font);
-    save_position(fp, &histogram_opts.title.offset, TRUE);
+    save_position(fp, &histogram_opts.title.offset, 2, TRUE);
     fprintf(fp, "\n");
 }
 
@@ -1624,14 +1752,14 @@ save_object(FILE *fp, int tag)
 
 	    if (this_rect->type == 1) {
 		fprintf(fp, "center ");
-		save_position(fp, &this_rect->center, FALSE);
+		save_position(fp, &this_rect->center, 2, FALSE);
 		fprintf(fp, " size ");
-		save_position(fp, &this_rect->extent, FALSE);
+		save_position(fp, &this_rect->extent, 2, FALSE);
 	    } else {
 		fprintf(fp, "from ");
-		save_position(fp, &this_rect->bl, FALSE);
+		save_position(fp, &this_rect->bl, 2, FALSE);
 		fprintf(fp, " to ");
-		save_position(fp, &this_rect->tr, FALSE);
+		save_position(fp, &this_rect->tr, 2, FALSE);
 	    }
 	}
 
@@ -1643,7 +1771,7 @@ save_object(FILE *fp, int tag)
 	    fprintf(fp, "%sobject %2d circle ", (fp==stderr) ? "\t" : "set ",this_object->tag);
 
 	    fprintf(fp, "center ");
-	    save_position(fp, &this_circle->center, FALSE);
+	    save_position(fp, &this_circle->center, 3, FALSE);
 	    fprintf(fp, " size ");
 	    fprintf(fp, "%s%g", e->scalex == first_axes ? "" : coord_msg[e->scalex], e->x);
 	    fprintf(fp, " arc [%g:%g] ", this_circle->arc_begin, this_circle->arc_end);
@@ -1657,7 +1785,7 @@ save_object(FILE *fp, int tag)
 	    showed = TRUE;
 	    fprintf(fp, "%sobject %2d ellipse ", (fp==stderr) ? "\t" : "set ",this_object->tag);
 	    fprintf(fp, "center ");
-	    save_position(fp, &this_ellipse->center, FALSE);
+	    save_position(fp, &this_ellipse->center, 3, FALSE);
 	    fprintf(fp, " size ");
 	    fprintf(fp, "%s%g", e->scalex == first_axes ? "" : coord_msg[e->scalex], e->x);
 	    fprintf(fp, ", %s%g", e->scaley == e->scalex ? "" : coord_msg[e->scaley], e->y);
@@ -1684,11 +1812,11 @@ save_object(FILE *fp, int tag)
 	    fprintf(fp, "%sobject %2d polygon ", (fp==stderr) ? "\t" : "set ",this_object->tag);
 	    if (this_polygon->vertex) {
 		fprintf(fp, "from ");
-		save_position(fp, &this_polygon->vertex[0], FALSE);
+		save_position(fp, &this_polygon->vertex[0], 3, FALSE);
 	    }
 	    for (nv=1; nv < this_polygon->type; nv++) {
 		fprintf(fp, (fp==stderr) ? "\n\t\t\t    to " : " to ");
-		save_position(fp, &this_polygon->vertex[nv], FALSE);
+		save_position(fp, &this_polygon->vertex[nv], 3, FALSE);
 	    }
 	}
 

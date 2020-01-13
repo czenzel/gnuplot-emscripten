@@ -1,5 +1,5 @@
 #
-# $Id: arrowstyle.dem,v 1.5 2014/03/09 20:14:17 markisch Exp $
+# $Id: arrowstyle.dem,v 1.4 2013/08/08 21:40:31 sfeam Exp $
 #
 #
 set xrange [-1000:1000]

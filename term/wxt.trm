@@ -1,7 +1,3 @@
-/*
- * $Id: wxt.trm,v 1.42.2.4 2016/01/26 17:24:39 sfeam Exp $
- */
-
 /* GNUPLOT - wxt.trm */
 
 /*[
@@ -204,18 +200,25 @@ TERM_PUBLIC void wxt_options()
 			term->flags &= ~TERM_ENHANCED_TEXT;
 			break;
 		case WXT_SIZE:
+		    {
+			double insize; /* shige 2019-02-27 for size 0 */
 			c_token++;
 			if (END_OF_COMMAND)
-				int_error(c_token,"size requires 'width,heigth'");
-			wxt_width = real_expression();
+				int_error(c_token,"size requires 'width,height'");
+			if ((insize = real_expression()) >= 1)
+				wxt_width = insize;
+			else
+				int_error(c_token, "size is out of range");
 			if (!equals(c_token++,","))
-				int_error(c_token,"size requires 'width,heigth'");
-			wxt_height = real_expression();
-			if (wxt_width < 1 || wxt_height < 1)
+				int_error(c_token,"size requires 'width,height'");
+			if ((insize = real_expression()) >= 1)
+				wxt_height = insize;
+			else
 				int_error(c_token, "size is out of range");
 			if (set_size) duplication=TRUE;
 			set_size = TRUE;
 			break;
+		    }
 		case WXT_POSITION:
 			c_token++;
 			if (END_OF_COMMAND)
@@ -325,15 +328,20 @@ TERM_PUBLIC void wxt_options()
 			}
 		case WXT_OTHER:
 		default:
-			wxt_window_number = int_expression();
-			if (set_number) duplication=TRUE;
-			set_number = TRUE;
-			/*int_error(c_token, "unrecognized terminal option");*/
+			if (isanumber(c_token) || type_udv(c_token) == INTGR) {
+				wxt_window_number = int_expression();
+				if (set_number) duplication=TRUE;
+				set_number = TRUE;
+			} else {
+				int_warn(c_token++, "unrecognized terminal option");
+			}
 			break;
 		}
 
-		if (duplication)
-			int_error(c_token-1, "Duplicated or contradicting arguments in wxt term options.");
+		if (duplication) {
+			int_warn(c_token-1, "Duplicated or contradicting arguments in wxt term options.");
+			duplication = FALSE;
+		}
 	}
 
 	/* Save options back into options string in normalized format */
@@ -461,7 +469,7 @@ TERM_PUBLIC void wxt_text_wrapper()
 
 #ifdef TERM_TABLE
 TERM_TABLE_START (wxt_driver)
-    "wxt", "wxWidgets cross-platform windowed terminal",
+    "wxt", "wxWidgets cross-platform interactive terminal",
     /* the following values are overriden by wxt_graphics */
     1 /* xmax */ , 1 /* ymax */ , 1 /* vchar */ , 1 /* hchar */ ,
     1 /* vtic */ , 1 /* htic */ ,
@@ -470,7 +478,7 @@ TERM_TABLE_START (wxt_driver)
     wxt_text_angle, wxt_justify_text,
     wxt_point, do_arrow, wxt_set_font,
     wxt_pointsize,
-    TERM_CAN_MULTIPLOT|TERM_NO_OUTPUTFILE|TERM_ALPHA_CHANNEL|TERM_CAN_DASH|TERM_FONTSCALE|TERM_ENHANCED_TEXT,
+    TERM_CAN_MULTIPLOT|TERM_NO_OUTPUTFILE|TERM_ALPHA_CHANNEL|TERM_CAN_DASH|TERM_FONTSCALE|TERM_ENHANCED_TEXT|TERM_LINEWIDTH,
     wxt_text /* suspend */, 0 /* resume */, wxt_fillbox, wxt_linewidth
 #ifdef USE_MOUSE
     , wxt_waitforinput, wxt_put_tmptext, wxt_set_ruler, wxt_set_cursor, wxt_set_clipboard

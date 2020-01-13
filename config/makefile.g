@@ -1,5 +1,5 @@
 #
-# $Id: makefile.g,v 1.7 2007/11/19 21:17:12 sfeam Exp $
+# $Id: makefile.g,v 1.6 2004/04/13 17:23:30 broeker Exp $
 #
 # GNUPLOT Makefile for GRASS, a geographic information system. 
 #

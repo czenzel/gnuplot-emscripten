@@ -1,0 +1,19 @@
+/* confdefs.h */
+#define PACKAGE_NAME "gnuplot"
+#define PACKAGE_TARNAME "gnuplot"
+#define PACKAGE_VERSION "5.2.8"
+#define PACKAGE_STRING "gnuplot 5.2.8"
+#define PACKAGE_BUGREPORT ""
+#define PACKAGE_URL ""
+#define PACKAGE "gnuplot"
+#define VERSION "5.2.8"
+#define VERSION_MAJOR "5.2"
+#define PATCHLEVEL "8"
+#define PROTOTYPES 1
+#define STDC_HEADERS 1
+#define HAVE_SYS_TYPES_H 1
+#define HAVE_SYS_STAT_H 1
+#define HAVE_STDLIB_H 1
+#define HAVE_STRING_H 1
+#define HAVE_MEMORY_H 1
+#define HAVE_STRINGS_H 1

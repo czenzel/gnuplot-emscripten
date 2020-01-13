@@ -1,5 +1,5 @@
 /*
- * $Id: datablock.c,v 1.5.2.2 2016/03/19 04:06:17 sfeam Exp $
+ * $Id: datablock.c,v 1.8.2.1 2017/06/05 20:40:28 sfeam Exp $
  */
 /* GNUPLOT - datablock.c */
 
@@ -103,14 +103,14 @@ datablock_command()
     name = parse_datablock_name();
     datablock = add_udv_by_name(name);
 
-    if (!datablock->udv_undef)
+    if (!equals(c_token, "<<") || !isletter(c_token+1))
+	int_error(c_token, "data block name must be followed by << EODmarker");
+
+    if (datablock->udv_value.type != NOTDEFINED)
 	gpfree_datablock(&datablock->udv_value);
-    datablock->udv_undef = FALSE;
     datablock->udv_value.type = DATABLOCK;
     datablock->udv_value.v.data_array = NULL;
 
-    if (!equals(c_token, "<<") || !isletter(c_token+1))
-	int_error(c_token, "data block name must be followed by << EODmarker");
     c_token++;
     eod = (char *) gp_alloc(token[c_token].length +2, "datablock");
     copy_str(&eod[0], c_token, token[c_token].length + 2);
@@ -175,7 +175,7 @@ get_datablock(char *name)
     struct udvt_entry *datablock;
 
     datablock = get_udv_by_name(name);
-    if (!datablock || datablock->udv_undef
+    if (!datablock || datablock->udv_value.type == NOTDEFINED
     ||  datablock->udv_value.v.data_array == NULL)
 	int_error(NO_CARET,"no datablock named %s",name);
 
@@ -198,22 +198,28 @@ gpfree_datablock(struct value *datablock_value)
     datablock_value->v.data_array = NULL;
 }
 
-
-/* resize or allocate a datablock; allocate memory in chuncks */
-static int
-enlarge_datablock(struct value *datablock_value, int extra)
+/* count number of lines in a datablock */
+int
+datablock_size(struct value *datablock_value)
 {
     char **dataline;
     int nlines = 0;
-    int osize, nsize;
-    const int blocksize = 512;
 
-    /* count number of lines in datablock */
     dataline = datablock_value->v.data_array;
     if (dataline) {
 	while (*dataline++)
 	    nlines++;
     }
+    return nlines;
+}
+
+/* resize or allocate a datablock; allocate memory in chuncks */
+static int
+enlarge_datablock(struct value *datablock_value, int extra)
+{
+    int osize, nsize;
+    const int blocksize = 512;
+    int nlines = datablock_size(datablock_value);
 
     /* reserve space in multiples of blocksize */
     osize = ((nlines+1 + blocksize-1) / blocksize) * blocksize; 

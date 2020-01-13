@@ -1,5 +1,5 @@
 #ifndef lint
-static char *RCSid() { return RCSid("$Id: doc2tex.c,v 1.26 2014/03/22 19:35:21 sfeam Exp $"); }
+static char *RCSid() { return RCSid("$Id: doc2tex.c,v 1.29 2017/05/13 03:42:05 sfeam Exp $"); }
 #endif
 
 /* GNUPLOT - doc2tex.c */
@@ -205,6 +205,19 @@ process_line( char *line, FILE *b)
 		    (void) fputs("\\begin{itemize}\\setlength{\\itemsep}{0pt}\n", b);
 		else if (line[1] == 'e')
 		    (void) fputs("\\end{itemize}\n", b);
+		else if (line[1] == 'b') {
+		    /* Bullet */
+		    fprintf(b, "\\item\n");
+		    puttex(line+2, b);
+		}
+		else if (line[1] == '#') {
+		    /* Continuation of bulleted line */
+		    puttex(line+2, b);
+		}
+		else if (!strncmp(line+1,"TeX",3)) {
+		    /* Treat rest of line as LaTeX command */
+		    fprintf(b, "%s\n", line + 5);
+		}
 		else {
 		    if (strchr(line, '\n'))
 			*(strchr(line, '\n')) = '\0';
@@ -215,32 +228,55 @@ process_line( char *line, FILE *b)
 	}
     case '^':{			/* external link escape */
                                 /* internal link escape */
-             /* convert '^ <a href="xxx">yyy</a>' to '\href{xxx}{yyy}' */
-	     /* convert '^ <a href="#xxx"></a> to '\ref{xxx}' */
-	     /* convert '^ <a name="xxx"></a> to '\label{xxx}' */
+            /* convert '^ <a href="xxx">yyy</a>' to '\href{xxx}{yyy}' */
+            /* convert '^ <a href="xxx">yyy to '\href{xxx}{yyy' */
+	    /* convert '^ </a>' after above to '}' */
+	    /* convert '^ <a href="#xxx">yyy</a> to 'yyy (\pageref{xxx})' */
+	    /* convert '^ <a href="#xxx"> to '{' (and save 'xxx') */
+	    /* convert '^ </a>' after above to '(\pageref(xxx)}' from saved 'xxx' */
+	    /* convert '^ <a name="xxx"></a> to '\label{xxx}' */
+	    /* HBB NOTE 2015-08-21: the program expects the above formats to match input
+	     * exactly, i.e. no extra whitespace anywhere! */
+
+	    static TBOOLEAN in_internal_href = FALSE;
+	    static char internal_href_string[MAX_LINE_LEN + 1];
+
             switch (line[3]) {
             case 'a':{
                     switch (line[5]) {
                     case 'h':{
+			    /* distinguish between external (full URL) and internal(#name) hrefs */
 	                    if (line[11] == '#') {
                                 fputs("{\\bf ",b);
                                 parsed = 0;
 		                for (i = 12; (c = line[i]) != '"'; i++) {
-                                    string[i-12] = c;
+                                    string[i - 12] = c;
                                 }
-                                string[i-12]= NUL;
-                                i++;i++;
-                                for ( ; i < initlen-5; i++) {
-                                     fputc(line[i],b);
-                                }
-                                fputs(" (p.~\\pageref{",b);
-                                fputs(string,b);
-                                fputs("})}} ",b);
-                                inhref = FALSE;
+                                string[i - 12]= NUL;
+                                i += 2; /* skip closing "> */
+				if ((i >= (initlen - 5)) || !strstr(line, "</a>")) {
+				    /* HBB CODEME 2015-08-21: no yyy text, or no closing </a>.
+				    ** treat this as a multiline href, and just output the entry TeX for now: */
+				    inhref = TRUE;
+				    in_internal_href = TRUE;
+				    strcpy(internal_href_string, string);
+				} else {
+				    for ( ; i < (initlen - 5); i++) {
+				         fputc(line[i],b);
+				    }
+				    fputs(" (p.~\\pageref{",b);
+				    fputs(string,b);
+				    fputs("})} ",b);
+				    inhref = FALSE;
+				    in_internal_href = FALSE;
+				}
                             } else {
 	                        inhref = TRUE;
+				in_internal_href = FALSE;
                                 if (strstr(line,"</a>") == NULL){
-                                   fputs("\\par\\hskip2.7em\\href{",b);
+				   // To always place urls on a separate line
+                                   // fputs("\\par\\hskip2.7em\\href{",b);
+                                   fputs("\\href{",b);
                                 } else {
                                    fputs("\\href{",b);
                                 }
@@ -280,9 +316,15 @@ process_line( char *line, FILE *b)
                     break;
     	       }
             case '/':
-		    if ( line[4] == 'a') {
-		        fputs("}\n\n",b);
-                        inhref = FALSE;
+		    if ((line[4] == 'a') && inhref) {
+			if (in_internal_href) {
+			    fputs(" (p.~\\pageref{",b);
+			    fputs(internal_href_string,b);
+			    fputs("})} ",b);
+		        } else {
+		            fputs("}\n\n",b);
+                            inhref = FALSE;
+			}
                     }
 		    break;
             default:
@@ -375,8 +417,8 @@ section(char *line, FILE *b)
         break;
 
     }
-    if (islower((int) string[0]))
-	string[0] = toupper(string[0]);
+    if (islower((unsigned char)string[0]))
+	string[0] = toupper((unsigned char)string[0]);
     puttex(string, b);
     (void) fprintf(b, "}\n");
 
@@ -474,13 +516,6 @@ puttex( char *str, FILE *file)
 #ifndef NO_CROSSREFS
 		    /* Make the final word an index entry also */
 		    fputs("\\index{",file);
-#if 0
-		    /* Aug 2006: no need to split index words at - or _ */
-		    if (strrchr(index,'-'))
-			index = strrchr(index,'-')+1;
-		    if (strrchr(index,'_'))
-			index = strrchr(index,'_')+1;
-#endif
 		    if (strrchr(index,' '))
 			index = strrchr(index,' ')+1;
 		    while ((s = strchr(index,'_')) != NULL) /* replace _ by space */
@@ -502,9 +537,9 @@ puttex( char *str, FILE *file)
 	    }
 	    break;
 	case '_':		/* emphasised text ? */
-	    for (i = 0; isalpha((int) (*(str + i))); i++);
+	    for (i = 0; isalpha((unsigned char) str[i]); i++);
 	    if ((i > 0) && (*(str + i) == '_') &&
-		           isspace((int) (*(str + i + 1)))) {
+		           isspace((unsigned char) str[i + 1])) {
 		(void) fputs("{\\em ", file);
 		for (; *str != '_'; str++) {
 		    (void) fputc(*str, file);
@@ -518,7 +553,7 @@ puttex( char *str, FILE *file)
         case 's':    /* find backquote after 'see' {see `} */
         case 'S':
             (void) fputc(ch, file);
-	    if ( str[0] == 'e' && str[1] == 'e' && isspace(str[2])){
+	    if ( str[0] == 'e' && str[1] == 'e' && isspace((unsigned char)str[2])){
                 see = TRUE;
             }
             break;

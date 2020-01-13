@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: pm3d.c,v 1.104.2.1 2016/09/26 05:38:00 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - pm3d.c */
 
 /*[
@@ -19,6 +15,7 @@ static char *RCSid() { return RCSid("$Id: pm3d.c,v 1.104.2.1 2016/09/26 05:38:00
 #endif
 #include "pm3d.h"
 #include "alloc.h"
+#include "getcolor.h"		/* for rgb1_from_gray */
 #include "graphics.h"
 #include "hidden3d.h"		/* p_vertex & map3d_xyz() */
 #include "plot2d.h"
@@ -34,23 +31,15 @@ struct lp_style_type default_pm3d_border = DEFAULT_LP_STYLE_TYPE;
 
 /* Used by routine filled_quadrangle() in color.c */
 struct lp_style_type pm3d_border_lp;
+TBOOLEAN track_pm3d_quadrangles;
 
 /*
   Global options for pm3d algorithm (to be accessed by set / show).
 */
 
-pm3d_struct pm3d = {
-    "s",			/* where[6] */
-    PM3D_FLUSH_BEGIN,		/* flush */
-    0,				/* no flushing triangles */
-    PM3D_SCANS_AUTOMATIC,	/* scans direction is determined automatically */
-    PM3D_CLIP_4IN,		/* clipping: all 4 points in ranges */
-    PM3D_EXPLICIT,		/* implicit */
-    PM3D_WHICHCORNER_MEAN,	/* color from which corner(s) */
-    1,				/* interpolate along scanline */
-    1,				/* interpolate between scanlines */
-    DEFAULT_LP_STYLE_TYPE	/* for the border */
-};
+pm3d_struct pm3d;	/* Initialized via init_session->reset_command->pm3d_reset */
+
+lighting_model pm3d_shade;
 
 typedef struct {
     double gray;
@@ -59,8 +48,14 @@ typedef struct {
 #ifdef EXTENDED_COLOR_SPECS
     gpiPoint icorners[4];
 #endif
-    t_colorspec *border_color;	/* Only used by depthorder processing */
+    union { /* Only used by depthorder processing */
+	t_colorspec *border_color;
+	unsigned int rgb_color;
+    } qcolor;
 } quadrangle;
+
+#define PM3D_USE_BORDER_COLOR_INSTEAD_OF_GRAY -12345
+#define PM3D_USE_RGB_COLOR_INSTEAD_OF_GRAY -12346
 
 static int allocated_quadrangles = 0;
 static int current_quadrangle = 0;
@@ -75,7 +70,10 @@ static double rms4 __PROTO((double, double, double, double));
 static void pm3d_plot __PROTO((struct surface_points *, int));
 static void pm3d_option_at_error __PROTO((void));
 static void pm3d_rearrange_part __PROTO((struct iso_curve *, const int, struct iso_curve ***, int *));
+static int apply_lighting_model __PROTO(( struct coordinate *, struct coordinate *, struct coordinate *, struct coordinate *, double gray ));
+
 static TBOOLEAN color_from_rgbvar = FALSE;
+static double light[3];
 
 /*
  * Utility routines.
@@ -164,21 +162,24 @@ rms4 (double x1, double x2, double x3, double x4)
  * Rescale z to cb values. Nothing to do if both z and cb are linear or log of the
  * same base, other it has to un-log z and subsequently log it again.
  */
+#if defined(NONLINEAR_AXES) && (NONLINEAR_AXES > 0)
+    /* z2cb is a no-op */
+#else
 double
-z2cb(double z)
+z2cb_with_logs(double z)
 {
     if (!Z_AXIS.log && !CB_AXIS.log) /* both are linear */
 	return z;
     if (Z_AXIS.log && !CB_AXIS.log) /* log z, linear cb */
-	return exp(z * Z_AXIS.log_base); /* unlog(z) */
+	return axis_undo_log((&Z_AXIS), z);
     if (!Z_AXIS.log && CB_AXIS.log) /* linear z, log cb */
-	return (z<=0) ? CB_AXIS.min : (log(z) / CB_AXIS.log_base);
+	return (z<=0) ? CB_AXIS.min : axis_do_log((&CB_AXIS), z);
     /* both are log */
     if (Z_AXIS.base==CB_AXIS.base) /* can we compare double numbers like that? */
 	return z;
     return z * Z_AXIS.log_base / CB_AXIS.log_base; /* log_cb(unlog_z(z)) */
 }
-
+#endif
 
 /*
  * Rescale cb (color) value into the interval of grays [0,1], taking care
@@ -188,12 +189,19 @@ z2cb(double z)
 double
 cb2gray(double cb)
 {
-    if (cb <= CB_AXIS.min)
+    AXIS *cbaxis = &CB_AXIS;
+
+    if (cb <= cbaxis->min)
 	return (sm_palette.positive == SMPAL_POSITIVE) ? 0 : 1;
-    if (cb >= CB_AXIS.max)
+    if (cb >= cbaxis->max)
 	return (sm_palette.positive == SMPAL_POSITIVE) ? 1 : 0;
-    cb = (cb - CB_AXIS.min)
-      / (CB_AXIS.max - CB_AXIS.min);
+
+    if (nonlinear(cbaxis)) {
+	cbaxis = cbaxis->linked_to_primary;
+	cb = eval_link_function(cbaxis, cb);
+    }
+
+    cb = (cb - cbaxis->min) / (cbaxis->max - cbaxis->min);
     return (sm_palette.positive == SMPAL_POSITIVE) ? cb : 1-cb;
 }
 
@@ -354,20 +362,18 @@ static int compare_quadrangles(const void* v1, const void* v2)
 
 void pm3d_depth_queue_clear(void)
 {
-    if (pm3d.direction != PM3D_DEPTH)
-	return;
-
-    if (quadrangles)
-	free(quadrangles);
-    quadrangles = (quadrangle*)0;
+    free(quadrangles);
+    quadrangles = NULL;
     allocated_quadrangles = 0;
     current_quadrangle = 0;
 }
 
 void pm3d_depth_queue_flush(void)
 {
-    if (pm3d.direction != PM3D_DEPTH)
+    if (pm3d.direction != PM3D_DEPTH && !track_pm3d_quadrangles)
 	return;
+
+    term->layer(TERM_LAYER_BEGIN_PM3D_FLUSH);
 
     if (current_quadrangle > 0 && quadrangles) {
 
@@ -379,8 +385,12 @@ void pm3d_depth_queue_flush(void)
 	double w = trans_mat[3][3];
 #endif
 	vertex out;
-	double z = 0; /* assignment keeps the compiler happy */
+	double z = 0;
+	double zbase = 0;
 	int i;
+
+	if (pm3d.base_sort)
+	    cliptorange(zbase, Z_AXIS.min, Z_AXIS.max);
 
 	for (qp = quadrangles, qe = quadrangles + current_quadrangle; qp != qe; qp++) {
 
@@ -391,7 +401,10 @@ void pm3d_depth_queue_flush(void)
 
 	    for (i = 0; i < 4; i++, gpdPtr++) {
 
-		map3d_xyz(gpdPtr->x, gpdPtr->y, gpdPtr->z, &out);
+		if (pm3d.base_sort)
+		    map3d_xyz(gpdPtr->x, gpdPtr->y, zbase, &out);
+		else
+		    map3d_xyz(gpdPtr->x, gpdPtr->y, gpdPtr->z, &out);
 
 		if (i == 0 || out.z > z)
 		    z = out.z;
@@ -410,14 +423,16 @@ void pm3d_depth_queue_flush(void)
 
 	for (qp = quadrangles, qe = quadrangles + current_quadrangle; qp != qe; qp++) {
 
-	    if (color_from_rgbvar)
-		set_rgbcolor_var(qp->gray);
+	    /* set the color */
+	    if (qp->gray == PM3D_USE_BORDER_COLOR_INSTEAD_OF_GRAY)
+		apply_pm3dcolor(qp->qcolor.border_color);
+	    else if (qp->gray == PM3D_USE_RGB_COLOR_INSTEAD_OF_GRAY)
+		set_rgbcolor_var(qp->qcolor.rgb_color);
+	    else if (pm3d_shade.strength > 0)
+		set_rgbcolor_var((unsigned int)qp->gray);
 	    else
 		set_color(qp->gray);
-#if (0)	/* FIXME: It used to do this, but I can't see when it would make sense */
-	    if (pm3d.border.l_type < 0)
-		pm3d_border_lp.pm3d_color = *(qp->border_color);
-#endif
+
 #ifdef EXTENDED_COLOR_SPECS
 	    ifilled_quadrangle(qp->icorners);
 #else
@@ -427,13 +442,12 @@ void pm3d_depth_queue_flush(void)
     }
 
     pm3d_depth_queue_clear();
+
+    term->layer(TERM_LAYER_END_PM3D_FLUSH);
 }
 
 /*
  * Now the implementation of the pm3d (s)plotting mode
- *
- * Note: the input parameter at_which_z is char, but an old HP cc requires
- * ANSI C K&R routines with int only.
  */
 static void
 pm3d_plot(struct surface_points *this_plot, int at_which_z)
@@ -453,15 +467,17 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
     gpiPoint icorners[4];
 #endif
     gpdPoint **bl_point = NULL; /* used for bilinear interpolation */
+    TBOOLEAN color_from_column = FALSE;
+
+    /* should never happen */
+    if (this_plot == NULL)
+	return;
 
     /* just a shortcut */
-    TBOOLEAN color_from_column = this_plot->pm3d_color_from_column;
+    color_from_column = this_plot->pm3d_color_from_column;
 
     color_from_rgbvar = (this_plot->lp_properties.pm3d_color.type == TC_RGB
 			&&  this_plot->lp_properties.pm3d_color.value == -1);
-
-    if (this_plot == NULL)
-	return;
 
     /* Apply and save the user-requested line properties */
     pm3d_border_lp = this_plot->lp_properties;
@@ -473,6 +489,10 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
     /* return if the terminal does not support filled polygons */
     if (!term->filled_polygon)
 	return;
+
+    /* for pm3dCompress.awk and pm3dConvertToImage.awk */
+    if (pm3d.direction != PM3D_DEPTH)
+	term->layer(TERM_LAYER_BEGIN_PM3D_MAP);
 
     switch (at_which_z) {
     case PM3D_AT_BASE:
@@ -516,6 +536,9 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 	    }
 	}
 
+	if (max_scan_pts == 0 || max_scans == 0)
+	    int_error(NO_CARET, "all scans empty");
+
 	if (interp_i <= 0) {
 	    ii = (interp_i == 0) ? DEFAULT_OPTIMAL_NB_POINTS : -interp_i;
 	    interp_i = floor(ii / max_scan_pts) + 1;
@@ -533,6 +556,7 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
     }
 
     if (pm3d.direction == PM3D_DEPTH) {
+	int needed_quadrangles = 0;
 
 	for (scan = 0; scan < this_plot->num_iso_read - 1; scan++) {
 
@@ -541,15 +565,24 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 
 	    are_ftriangles = pm3d.ftriangles && (scanA->p_count != scanB->p_count);
 	    if (!are_ftriangles)
-		allocated_quadrangles += GPMIN(scanA->p_count, scanB->p_count) - 1;
+		needed_quadrangles += GPMIN(scanA->p_count, scanB->p_count) - 1;
 	    else {
-		allocated_quadrangles += GPMAX(scanA->p_count, scanB->p_count) - 1;
+		needed_quadrangles += GPMAX(scanA->p_count, scanB->p_count) - 1;
 	    }
 	}
-	allocated_quadrangles *= (interp_i > 1) ? interp_i : 1;
-	allocated_quadrangles *= (interp_j > 1) ? interp_j : 1;
-	quadrangles = (quadrangle*)gp_realloc(quadrangles, allocated_quadrangles * sizeof (quadrangle), "pm3d_plot->quadrangles");
-	/* DEBUG: fprintf(stderr, "allocated_quadrangles = %d\n", allocated_quadrangles); */
+	needed_quadrangles *= (interp_i > 1) ? interp_i : 1;
+	needed_quadrangles *= (interp_j > 1) ? interp_j : 1;
+
+	if (needed_quadrangles > 0) {
+	    while (current_quadrangle + needed_quadrangles >= allocated_quadrangles) {
+		FPRINTF((stderr, "allocated_quadrangles = %d current = %d needed = %d\n",
+		    allocated_quadrangles, current_quadrangle, needed_quadrangles));
+		allocated_quadrangles = needed_quadrangles + 2*allocated_quadrangles;
+		quadrangles = (quadrangle*)gp_realloc(quadrangles,
+			    allocated_quadrangles * sizeof (quadrangle),
+			    "pm3d_plot->quadrangles");
+	    }
+	}
     }
     /* pm3d_rearrange_scan_array(this_plot, (struct iso_curve***)0, (int*)0, &scan_array, &invert); */
 
@@ -682,6 +715,7 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 	    }
 
 	    if ((interp_i <= 1 && interp_j <= 1) || pm3d.direction == PM3D_DEPTH) {
+
 #ifdef EXTENDED_COLOR_SPECS
 	      if ((term->flags & TERM_EXTENDED_COLOR) == 0)
 #endif
@@ -690,7 +724,7 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 		   (note: log scale is already included). The average is calculated here
 		   if there is no interpolation (including the "pm3d depthorder" option),
 		   otherwise it is done for each interpolated quadrangle later.
-		   I always wonder what is faster: d*0.25 or d/4? Someone knows? -- 0.25 (joze) */
+		 */
 		if (color_from_column) {
 		    /* color is set in plot3d.c:get_3ddata() */
 		    cb1 = pointsA[i].CRD_COLOR;
@@ -747,20 +781,37 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 		if (isnan(avgC))
 		    continue;
 
-		if (color_from_rgbvar) /* we were given an explicit color */
+		/* Option to not drawn quadrangles with cb out of range */
+		if (pm3d.no_clipcb && (avgC > CB_AXIS.max))
+		    continue;
+		if (pm3d.no_clipcb && (avgC < CB_AXIS.min))
+		    continue;
+
+		if (color_from_rgbvar) /* we were given an RGB color */
 			gray = avgC;
 		else /* transform z value to gray, i.e. to interval [0,1] */
 			gray = cb2gray(avgC);
 
-		/* print the quadrangle with the given color */
-		FPRINTF((stderr, "averageColor %g\tgray=%g\tM %g %g L %g %g L %g %g L %g %g\n",
-		       avgC, gray, pointsA[i].x, pointsA[i].y, pointsB[ii].x, pointsB[ii].y,
-		       pointsB[ii1].x, pointsB[ii1].y, pointsA[i1].x, pointsA[i1].y));
+		/* apply lighting model */
+		if (pm3d_shade.strength > 0) {
+		    if (at_which_z == PM3D_AT_SURFACE)
+			gray = apply_lighting_model( &pointsA[i], &pointsA[i1],
+					&pointsB[ii], &pointsB[ii1], gray);
+		    /* Don't apply lighting model to TOP/BOTTOM projections  */
+		    /* but convert from floating point 0<gray<1 to RGB color */
+		    /* since that is what would have been returned from the  */
+		    /* lighting code.					     */
+		    else if (!color_from_rgbvar) {
+			rgb255_color temp;
+			rgb255maxcolors_from_gray(gray, &temp);
+			gray = (long)((temp.r << 16) + (temp.g << 8) + (temp.b));
+		    }
+		}
 
 		/* set the color */
 		if (pm3d.direction != PM3D_DEPTH) {
-		    if (color_from_rgbvar)
-			set_rgbcolor_var(gray);
+		    if (color_from_rgbvar || pm3d_shade.strength > 0)
+			set_rgbcolor_var((unsigned int)gray);
 		    else
 			set_color(gray);
 		}
@@ -777,9 +828,6 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 	    corners[3].y = pointsA[i1].y;
 
 	    if (interp_i > 1 || interp_j > 1 || at_which_z == PM3D_AT_SURFACE) {
-		/* always supply the z value if
-		 * EXTENDED_COLOR_SPECS is defined
-		 */
 		corners[0].z = pointsA[i].z;
 		corners[1].z = pointsB[ii].z;
 		corners[2].z = pointsB[ii1].z;
@@ -813,7 +861,6 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 	    if (pm3d.direction == PM3D_DEPTH) {
 		/* copy quadrangle */
 		quadrangle* qp = quadrangles + current_quadrangle;
-
 		memcpy(qp->corners, corners, 4 * sizeof (gpdPoint));
 		qp->gray = gray;
 		for (i = 0; i < 4; i++) {
@@ -899,18 +946,19 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 			    corners[2].x, corners[2].y, corners[3].x, corners[3].y));
 
 			/* If the colors are given separately, we already loaded them above */
-			if (!color_from_column) {
-			    cb1 = z2cb(corners[0].z);
-			    cb2 = z2cb(corners[1].z);
-			    cb3 = z2cb(corners[2].z);
-			    cb4 = z2cb(corners[3].z);
-			} else {
+			if (color_from_column) {
 			    cb1 = corners[0].c;
 			    cb2 = corners[1].c;
 			    cb3 = corners[2].c;
 			    cb4 = corners[3].c;
+			} else {
+			    cb1 = z2cb(corners[0].z);
+			    cb2 = z2cb(corners[1].z);
+			    cb3 = z2cb(corners[2].z);
+			    cb4 = z2cb(corners[3].z);
 			}
 			switch (pm3d.which_corner_color) {
+			    default:
 			    case PM3D_WHICHCORNER_MEAN: avgC = (cb1 + cb2 + cb3 + cb4) * 0.25; break;
 			    case PM3D_WHICHCORNER_GEOMEAN: avgC = geomean4(cb1, cb2, cb3, cb4); break;
 			    case PM3D_WHICHCORNER_HARMEAN: avgC = harmean4(cb1, cb2, cb3, cb4); break;
@@ -922,7 +970,6 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 			    case PM3D_WHICHCORNER_C2: avgC = cb2; break;
 			    case PM3D_WHICHCORNER_C3: avgC = cb3; break;
 			    case PM3D_WHICHCORNER_C4: avgC = cb4; break;
-			    default: int_error(NO_CARET, "cannot be here"); avgC = 0;
 			}
 
 			if (color_from_rgbvar) /* we were given an explicit color */
@@ -930,16 +977,46 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 			else /* transform z value to gray, i.e. to interval [0,1] */
 				gray = cb2gray(avgC);
 
+			/* apply lighting model */
+			if (pm3d_shade.strength > 0) {
+			    /* FIXME: coordinate->quadrangle->coordinate seems crazy */
+			    coordinate corcorners[4];
+			    int i;
+			    for (i=0; i<4; i++) {
+				corcorners[i].x = corners[i].x;
+				corcorners[i].y = corners[i].y;
+				corcorners[i].z = corners[i].z;
+			    }
+
+			    if (at_which_z == PM3D_AT_SURFACE)
+				gray = apply_lighting_model( &corcorners[0], &corcorners[1],
+						&corcorners[2], &corcorners[3], gray);
+			    /* Don't apply lighting model to TOP/BOTTOM projections  */
+			    /* but convert from floating point 0<gray<1 to RGB color */
+			    /* since that is what would have been returned from the  */
+			    /* lighting code.					     */
+			    else if (!color_from_rgbvar) {
+				rgb255_color temp;
+				rgb255maxcolors_from_gray(gray, &temp);
+				gray = (long)((temp.r << 16) + (temp.g << 8) + (temp.b));
+			    }
+			}
+	
 			if (pm3d.direction == PM3D_DEPTH) {
 			    /* copy quadrangle */
 			    quadrangle* qp = quadrangles + current_quadrangle;
 			    memcpy(qp->corners, corners, 4 * sizeof (gpdPoint));
-			    qp->gray = gray;
-			    qp->border_color = &this_plot->lp_properties.pm3d_color;
+			    if (color_from_rgbvar) {
+				qp->gray = PM3D_USE_RGB_COLOR_INSTEAD_OF_GRAY;
+				qp->qcolor.rgb_color = (unsigned int)gray;
+			    } else {
+				qp->gray = gray;
+				qp->qcolor.border_color = &this_plot->lp_properties.pm3d_color;
+			    }
 			    current_quadrangle++;
 			} else {
-			    if (color_from_rgbvar)
-				set_rgbcolor_var(gray);
+			    if (pm3d_shade.strength > 0 || color_from_rgbvar)
+				set_rgbcolor_var((unsigned int)gray);
 			    else
 				set_color(gray);
 			    if (at_which_z == PM3D_AT_BASE)
@@ -957,8 +1034,13 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
 		    /* copy quadrangle */
 		    quadrangle* qp = quadrangles + current_quadrangle;
 		    memcpy(qp->corners, corners, 4 * sizeof (gpdPoint));
-		    qp->gray = gray;
-		    qp->border_color = &this_plot->lp_properties.pm3d_color;
+		    if (color_from_rgbvar) {
+			qp->gray = PM3D_USE_RGB_COLOR_INSTEAD_OF_GRAY;
+			qp->qcolor.rgb_color = (unsigned int)gray;
+		    } else {
+			qp->gray = gray;
+			qp->qcolor.border_color = &this_plot->lp_properties.pm3d_color;
+		    }
 		    current_quadrangle++;
 		}
 	    } /* interpolate between points */
@@ -973,7 +1055,12 @@ pm3d_plot(struct surface_points *this_plot, int at_which_z)
     }
     /* free memory allocated by scan_array */
     free(scan_array);
+
+    /* for pm3dCompress.awk and pm3dConvertToImage.awk */
+    if (pm3d.direction != PM3D_DEPTH)
+	term->layer(TERM_LAYER_END_PM3D_MAP);
 }				/* end of pm3d splotting mode */
+
 
 #ifdef PM3D_CONTOURS
 /*
@@ -1035,13 +1122,20 @@ pm3d_reset()
     strcpy(pm3d.where, "s");
     pm3d.flush = PM3D_FLUSH_BEGIN;
     pm3d.ftriangles = 0;
-    pm3d.direction = PM3D_SCANS_AUTOMATIC;
     pm3d.clip = PM3D_CLIP_4IN;
+    pm3d.no_clipcb = FALSE;
+    pm3d.direction = PM3D_SCANS_AUTOMATIC;
     pm3d.implicit = PM3D_EXPLICIT;
     pm3d.which_corner_color = PM3D_WHICHCORNER_MEAN;
     pm3d.interp_i = 1;
     pm3d.interp_j = 1;
+    pm3d.border = default_pm3d_border;
     pm3d.border.l_type = LT_NODRAW;
+    pm3d.base_sort = FALSE;
+
+    pm3d_shade.strength = 0.0;
+    pm3d_shade.spec = 0.0;
+    pm3d_shade.fixed = TRUE;
 }
 
 
@@ -1059,9 +1153,12 @@ pm3d_draw_one(struct surface_points *plot)
     if (!where[0])
 	return;
 
-    /* for pm3dCompress.awk */
-    if (pm3d.direction != PM3D_DEPTH)
-	term->layer(TERM_LAYER_BEGIN_PM3D_MAP);
+    /* Initialize lighting model */
+    if (pm3d_shade.strength > 0) {
+	light[0] = cos(-DEG2RAD*pm3d_shade.rot_x)*cos(-(DEG2RAD*pm3d_shade.rot_z+90));
+	light[2] = cos(-DEG2RAD*pm3d_shade.rot_x)*sin(-(DEG2RAD*pm3d_shade.rot_z+90));
+	light[1] = sin(-DEG2RAD*pm3d_shade.rot_x);
+    }
 
     for (; where[i]; i++) {
 	pm3d_plot(plot, where[i]);
@@ -1082,12 +1179,27 @@ pm3d_draw_one(struct surface_points *plot)
 	    filled_color_contour_plot(plot, CONTOUR_BASE);
     }
 #endif
-
-    /* for pm3dCompress.awk */
-    if (pm3d.direction != PM3D_DEPTH)
-	term->layer(TERM_LAYER_END_PM3D_MAP);
 }
 
+
+/*
+ * Add one pm3d quadrangle to the mix.
+ * Called by zerrorfill().
+ */
+void
+pm3d_add_quadrangle(struct surface_points *plot, gpdPoint corners[4])
+{
+    quadrangle *q;
+
+    if (allocated_quadrangles < current_quadrangle + plot->iso_crvs->p_count) {
+	allocated_quadrangles += 2 * plot->iso_crvs->p_count;
+	quadrangles = (quadrangle*)gp_realloc(quadrangles, allocated_quadrangles * sizeof (quadrangle), "pm3d_plot->quadrangles");
+    }
+    q = quadrangles + current_quadrangle++;
+    memcpy(q->corners, corners, 4*sizeof(gpdPoint));
+    q->qcolor.border_color = &plot->fill_properties.border_color;
+    q->gray = PM3D_USE_BORDER_COLOR_INSTEAD_OF_GRAY;
+}
 
 /* Display an error message for the routine get_pm3d_at_option() below.
  */
@@ -1206,11 +1318,12 @@ set_plot_with_palette(int plot_num, int plot_mode)
     if (plot_mode == MODE_SPLOT)
 	if (TC_USES_PALETTE(axis_array[FIRST_Z_AXIS].label.textcolor.type)) return;
     if (TC_USES_PALETTE(axis_array[COLOR_AXIS].label.textcolor.type)) return;
-
+#ifdef EAM_OBJECTS
     for (this_object = first_object; this_object != NULL; this_object = this_object->next) {
 	if (TC_USES_PALETTE(this_object->lp_properties.pm3d_color.type))
 	    return;
     }
+#endif
     
 #undef TC_USES_PALETTE
 
@@ -1230,3 +1343,108 @@ is_plot_with_colorbox()
     return plot_has_palette && (color_box.where != SMCOLOR_BOX_NO);
 }
 
+/*
+ * Adjust current RGB color based on pm3d lighting model.
+ */
+int
+apply_lighting_model( struct coordinate *v0, struct coordinate *v1, 
+		struct coordinate *v2, struct coordinate *v3,
+		double gray )
+{
+    double normal[3];
+    double normal1[3];
+    double reflect[3];
+    double t;
+    double phi;
+    double psi;
+    int rgb;
+    rgb_color color;
+    double r, g, b, tmp_r, tmp_g, tmp_b;
+    double dot_prod, shade_fact, spec_fact;
+
+    if (color_from_rgbvar) {
+	rgb = gray;
+	r = (double)((rgb >> 16) & 0xFF) / 255.;
+	g = (double)((rgb >>  8) & 0xFF) / 255.;
+	b = (double)((rgb      ) & 0xFF) / 255.;
+    } else {
+	rgb1_from_gray(gray, &color);
+	r = color.r;
+	g = color.g;
+	b = color.b;	   
+    }
+
+    psi = -DEG2RAD*(surface_rot_z);
+    phi = -DEG2RAD*(surface_rot_x);
+
+    normal[0] = (v1->y-v0->y)*(v2->z-v0->z)*yscale3d*zscale3d
+	      - (v1->z-v0->z)*(v2->y-v0->y)*yscale3d*zscale3d;
+    normal[1] = (v1->z-v0->z)*(v2->x-v0->x)*xscale3d*zscale3d
+	      - (v1->x-v0->x)*(v2->z-v0->z)*xscale3d*zscale3d;
+    normal[2] = (v1->x-v0->x)*(v2->y-v0->y)*xscale3d*yscale3d
+	      - (v1->y-v0->y)*(v2->x-v0->x)*xscale3d*yscale3d ;
+
+    t = sqrt( normal[0]*normal[0] + normal[1]*normal[1] + normal[2]*normal[2] );
+
+    normal[0] /= t;    
+    normal[1] /= t;    
+    normal[2] /= t;    
+
+    /* Correct for the view angle so that the illumination is "fixed" with */
+    /* respect to the viewer rather than rotating with the surface.        */
+    if (pm3d_shade.fixed) {
+	normal1[0] =  cos(psi)*normal[0] -  sin(psi)*normal[1] + 0*normal[2];
+	normal1[1] =  sin(psi)*normal[0] +  cos(psi)*normal[1] + 0*normal[2];
+	normal1[2] =  0*normal[0] +                0*normal[1] + 1*normal[2];
+	
+	normal[0] =  1*normal1[0] +         0*normal1[1] +         0*normal1[2];
+	normal[1] =  0*normal1[0] +  cos(phi)*normal1[1] -  sin(phi)*normal1[2];
+	normal[2] =  0*normal1[0] +  sin(phi)*normal1[1] +  cos(phi)*normal1[2];
+    }
+
+    if (normal[2] < 0.0) {
+	normal[0] *= -1.0;
+	normal[1] *= -1.0;
+	normal[2] *= -1.0;
+    }
+
+    dot_prod = normal[0]*light[0] + normal[1]*light[1] + normal[2]*light[2];
+    shade_fact = (dot_prod < 0) ? -dot_prod : 0;
+
+    tmp_r = r*(pm3d_shade.ambient-pm3d_shade.strength+shade_fact*pm3d_shade.strength);
+    tmp_g = g*(pm3d_shade.ambient-pm3d_shade.strength+shade_fact*pm3d_shade.strength);
+    tmp_b = b*(pm3d_shade.ambient-pm3d_shade.strength+shade_fact*pm3d_shade.strength);
+
+    /* Specular highlighting */ 
+    if (pm3d_shade.spec > 0.0) {
+
+	reflect[0] = -light[0]+2*dot_prod*normal[0];
+	reflect[1] = -light[1]+2*dot_prod*normal[1];
+	reflect[2] = -light[2]+2*dot_prod*normal[2];
+	t = sqrt( reflect[0]*reflect[0] + reflect[1]*reflect[1] + reflect[2]*reflect[2] );
+	reflect[0] /= t;
+	reflect[1] /= t;
+	reflect[2] /= t;
+	
+	dot_prod = -reflect[2];
+	if (dot_prod < 0.0)
+	    dot_prod = 0;
+
+	/* old-style Phong equation; no need for bells or whistles */
+	spec_fact = pow(dot_prod, pm3d_shade.Phong);
+
+	tmp_r += pm3d_shade.spec*spec_fact;
+	tmp_g += pm3d_shade.spec*spec_fact;
+	tmp_b += pm3d_shade.spec*spec_fact;
+    }
+
+    tmp_r = clip_to_01(tmp_r);
+    tmp_g = clip_to_01(tmp_g);
+    tmp_b = clip_to_01(tmp_b);
+
+    rgb = ((unsigned char)((tmp_r)*255.) << 16)
+	+ ((unsigned char)((tmp_g)*255.) <<  8)
+	+ ((unsigned char)((tmp_b)*255.));
+
+    return rgb;
+}

@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: show.c,v 1.326.2.17 2016/09/03 23:18:58 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - show.c */
 
 /*[
@@ -52,12 +48,14 @@ static char *RCSid() { return RCSid("$Id: show.c,v 1.326.2.17 2016/09/03 23:18:5
 #include "gp_time.h"
 #include "graphics.h"
 #include "hidden3d.h"
+#include "jitter.h"
 #include "misc.h"
 #include "gp_hist.h"
 #include "plot2d.h"
 #include "plot3d.h"
 #include "save.h"
 #include "tables.h"
+#include "tabulate.h"
 #include "util.h"
 #include "term_api.h"
 #include "variable.h"
@@ -82,7 +80,6 @@ static void show_at __PROTO((void));
 static void disp_at __PROTO((struct at_type *, int));
 static void show_all __PROTO((void));
 static void show_autoscale __PROTO((void));
-static void show_bars __PROTO((void));
 static void show_border __PROTO((void));
 static void show_boxwidth __PROTO((void));
 static void show_boxplot __PROTO((void));
@@ -123,6 +120,7 @@ static void show_palette_colornames __PROTO((void));
 static void show_colorbox __PROTO((void));
 static void show_pointsize __PROTO((void));
 static void show_pointintervalbox __PROTO((void));
+static void show_rgbmax __PROTO((void));
 static void show_encoding __PROTO((void));
 static void show_decimalsign __PROTO((void));
 static void show_fit __PROTO((void));
@@ -145,10 +143,11 @@ static void show_size __PROTO((void));
 static void show_origin __PROTO((void));
 static void show_term __PROTO((void));
 static void show_tics __PROTO((TBOOLEAN showx, TBOOLEAN showy, TBOOLEAN showz, TBOOLEAN showx2, TBOOLEAN showy2, TBOOLEAN showcb));
-static void show_mtics __PROTO((AXIS_INDEX));
+static void show_mtics __PROTO((struct axis *));
 static void show_timestamp __PROTO((void));
 static void show_range __PROTO((AXIS_INDEX axis));
 static void show_link __PROTO((void));
+static void show_nonlinear __PROTO((void));
 static void show_xyzlabel __PROTO((const char *name, const char *suffix, text_label * label));
 static void show_title __PROTO((void));
 static void show_axislabel __PROTO((AXIS_INDEX));
@@ -159,10 +158,10 @@ static void show_loadpath __PROTO((void));
 static void show_fontpath __PROTO((void));
 static void show_zero __PROTO((void));
 static void show_datafile __PROTO((void));
+static void show_table __PROTO((void));
+static void show_micro __PROTO((void));
 static void show_minus_sign __PROTO((void));
-#ifdef USE_MOUSE
 static void show_mouse __PROTO((void));
-#endif
 static void show_plot __PROTO((void));
 static void show_variables __PROTO((void));
 
@@ -172,13 +171,13 @@ static void show_arrowstyle __PROTO((int tag));
 static void show_arrow __PROTO((int tag));
 
 static void show_ticdef __PROTO((AXIS_INDEX));
-       void show_position __PROTO((struct position * pos));
+static void show_ticdefp __PROTO((struct axis *));
+       void show_position __PROTO((struct position * pos, int ndim));
 static void show_functions __PROTO((void));
 
 static int var_show_all = 0;
 
 /* following code segments appear over and over again */
-#define SHOW_NUM_OR_TIME(x, axis) save_num_or_time_input(stderr, x, axis)
 #define SHOW_ALL_NL { if (!var_show_all) (void) putc('\n',stderr); }
 
 #define PROGRAM "G N U P L O T"
@@ -213,7 +212,7 @@ show_command()
 	show_autoscale();
 	break;
     case S_BARS:
-	show_bars();
+	save_bars(stderr);
 	break;
     case S_BIND:
 	while (!END_OF_COMMAND) c_token++;
@@ -265,7 +264,9 @@ show_command()
 	break;
     case S_ZEROAXIS:
 	show_zeroaxis(FIRST_X_AXIS);
+	show_zeroaxis(SECOND_X_AXIS);
 	show_zeroaxis(FIRST_Y_AXIS);
+	show_zeroaxis(SECOND_Y_AXIS);
 	show_zeroaxis(FIRST_Z_AXIS);
 	break;
     case S_XZEROAXIS:
@@ -325,11 +326,17 @@ show_command()
     case S_LINK:
 	show_link();
 	break;
+    case S_NONLINEAR:
+	show_nonlinear();
+	break;
     case S_KEY:
 	show_key();
 	break;
     case S_LOGSCALE:
 	show_logscale();
+	break;
+    case S_MICRO:
+	show_micro();
 	break;
     case S_MINUS_SIGN:
 	show_minus_sign();
@@ -372,6 +379,9 @@ show_command()
     case S_POINTSIZE:
 	show_pointsize();
 	break;
+    case S_RGBMAX:
+	show_rgbmax();
+	break;
     case S_DECIMALSIGN:
 	show_decimalsign();
 	break;
@@ -410,6 +420,9 @@ show_command()
     case S_ISOSAMPLES:
 	show_isosamples();
 	break;
+    case S_JITTER:
+	show_jitter();
+	break;
     case S_VIEW:
 	show_view();
 	break;
@@ -441,29 +454,37 @@ show_command()
     case S_TICS:
     case S_TICSLEVEL:
     case S_TICSCALE:
-    case S_XYPLANE:
 	show_tics(TRUE, TRUE, TRUE, TRUE, TRUE, TRUE);
 	break;
     case S_MXTICS:
-	show_mtics(FIRST_X_AXIS);
+	show_mtics(&axis_array[FIRST_X_AXIS]);
 	break;
     case S_MYTICS:
-	show_mtics(FIRST_Y_AXIS);
+	show_mtics(&axis_array[FIRST_Y_AXIS]);
 	break;
     case S_MZTICS:
-	show_mtics(FIRST_Z_AXIS);
+	show_mtics(&axis_array[FIRST_Z_AXIS]);
 	break;
     case S_MCBTICS:
-	show_mtics(COLOR_AXIS);
+	show_mtics(&axis_array[COLOR_AXIS]);
 	break;
     case S_MX2TICS:
-	show_mtics(SECOND_X_AXIS);
+	show_mtics(&axis_array[SECOND_X_AXIS]);
 	break;
     case S_MY2TICS:
-	show_mtics(SECOND_Y_AXIS);
+	show_mtics(&axis_array[SECOND_Y_AXIS]);
 	break;
     case S_MRTICS:
-	show_mtics(POLAR_AXIS);
+	show_mtics(&R_AXIS);
+	break;
+    case S_MTTICS:
+	show_mtics(&THETA_AXIS);
+	break;
+    case S_XYPLANE:
+	if (xyplane.absolute)
+	    fprintf(stderr, "\txyplane intercepts z axis at %g\n", xyplane.z);
+	else
+	    fprintf(stderr, "\txyplane %g\n", xyplane.z);
 	break;
     case S_TIMESTAMP:
 	show_timestamp();
@@ -513,6 +534,9 @@ show_command()
     case S_CBLABEL:
 	show_axislabel(COLOR_AXIS);
 	break;
+    case S_RLABEL:
+	show_axislabel(POLAR_AXIS);
+	break;
     case S_X2LABEL:
 	show_axislabel(SECOND_X_AXIS);
 	break;
@@ -552,14 +576,15 @@ show_command()
     case S_DATAFILE:
 	show_datafile();
 	break;
-#ifdef USE_MOUSE
+    case S_TABLE:
+	show_table();
+	break;
     case S_MOUSE:
 	show_mouse();
 	break;
-#endif
     case S_PLOT:
 	show_plot();
-#if defined(READLINE) || defined(HAVE_LIBREADLINE) || defined(HAVE_LIBEDITLINE)
+#if defined(USE_READLINE)
 	if (!END_OF_COMMAND) {
 	    if (almost_equals(c_token, "a$dd2history")) {
 		c_token++;
@@ -595,6 +620,9 @@ show_command()
     case S_RTICS:
 	show_ticdef(POLAR_AXIS);
 	break;
+    case S_TTICS:
+	show_ticdefp(&THETA_AXIS);
+	break;
     case S_X2TICS:
     case S_X2DTICS:
     case S_X2MTICS:
@@ -613,6 +641,13 @@ show_command()
     case S_TERMOPTIONS:
 	fprintf(stderr,"Terminal options are '%s'\n",
 		(*term_options) ? term_options : "[none]");
+	break;
+
+    case S_THETA:
+	fprintf(stderr,"Theta increases %s with origin at %s of plot\n",
+		theta_direction > 0 ? "counterclockwise" : "clockwise",
+		theta_origin == 180 ? "left" : theta_origin ==  90 ? "top" :
+		theta_origin == -90 ? "bottom" : "right");
 	break;
 
     /* HBB 20010525: 'set commands' that don't have an
@@ -732,7 +767,7 @@ show_all()
 
     show_version(stderr);
     show_autoscale();
-    show_bars();
+    save_bars(stderr);
     show_border();
     show_boxwidth();
     show_clip();
@@ -753,6 +788,7 @@ show_all()
     show_logscale();
     show_offsets();
     show_margin();
+    show_micro();
     show_minus_sign();
     show_output();
     show_print();
@@ -762,6 +798,7 @@ show_all()
     show_pm3d();
     show_pointsize();
     show_pointintervalbox();
+    show_rgbmax();
     show_encoding();
     show_decimalsign();
     show_fit();
@@ -780,11 +817,11 @@ show_all()
     show_origin();
     show_term();
     show_tics(TRUE,TRUE,TRUE,TRUE,TRUE,TRUE);
-    show_mtics(FIRST_X_AXIS);
-    show_mtics(FIRST_Y_AXIS);
-    show_mtics(FIRST_Z_AXIS);
-    show_mtics(SECOND_X_AXIS);
-    show_mtics(SECOND_Y_AXIS);
+    show_mtics(&axis_array[FIRST_X_AXIS]);
+    show_mtics(&axis_array[FIRST_Y_AXIS]);
+    show_mtics(&axis_array[FIRST_Z_AXIS]);
+    show_mtics(&axis_array[SECOND_X_AXIS]);
+    show_mtics(&axis_array[SECOND_Y_AXIS]);
     show_xyzlabel("", "time", &timelabel);
     if (parametric || polar) {
 	if (!is_3d_plot)
@@ -799,6 +836,7 @@ show_all()
     show_range(SECOND_X_AXIS);
     show_range(SECOND_Y_AXIS);
     show_range(FIRST_Z_AXIS);
+    show_jitter();
     show_title();
     show_axislabel(FIRST_X_AXIS );
     show_axislabel(FIRST_Y_AXIS );
@@ -925,10 +963,6 @@ show_version(FILE *fp)
 #endif
 		"";
 
-	    const char *binary_files =
-		"+BINARY_DATA  "
-		"";
-
 	    const char *nocwdrc =
 #ifdef USE_CWDRC
 		"+"
@@ -940,10 +974,6 @@ show_version(FILE *fp)
 	    const char *x11 =
 #ifdef X11
 		"+X11  "
-		"+X11_POLYGON  "
-#ifdef USE_X11_MULTIBYTE
-		"+MULTIBYTE  "
-#endif
 #ifdef EXTERNAL_X11_WINDOW
 		"+X11_EXTERNAL "
 #endif
@@ -967,16 +997,9 @@ show_version(FILE *fp)
 		"";
 
 	    const char *plotoptions=
-		"+DATASTRINGS  "
-		"+HISTOGRAMS  "
 #ifdef EAM_OBJECTS
 		"+OBJECTS  "
 #endif
-		"+STRINGVARS  "
-		"+MACROS  "
-		"+THIN_SPLINES  "
-		"+IMAGE  "
-		"+USER_LINETYPES "
 #ifdef USE_STATS
 		"+STATS "
 #else
@@ -987,14 +1010,18 @@ show_version(FILE *fp)
 #endif
 	    "";
 
-	    sprintf(compile_options, "\
-%s%s\n%s%s\n\
-%s%s%s\n\
-%s%s%s%s\n%s\n",
-		    rdline, gnu_rdline, compatibility, binary_files,
+	    const char *unicodebuild =
+#if defined(_WIN32) && defined(UNICODE)
+		"+UNICODE  ";
+#else
+		"";
+#endif
+
+	    sprintf(compile_options, "    %s%s\n    %s%s%s\n    %s%s%s\n    %s%s%s%s\n",
+		    rdline, gnu_rdline, compatibility, unicodebuild, plotoptions,
 		    libcerf, libgd, linuxvga,
-		    nocwdrc, x11, use_mouse, hiddenline,
-		    plotoptions);
+		    nocwdrc, x11, use_mouse, hiddenline
+		    );
 	}
 
 	compile_options = gp_realloc(compile_options, strlen(compile_options)+1, "compile_options");
@@ -1056,8 +1083,8 @@ show_version(FILE *fp)
     if (almost_equals(c_token, "l$ong")) {
 
 	c_token++;
-	fprintf(stderr, "Compile options:\n%s", compile_options);
-	fprintf(stderr, "MAX_PARALLEL_AXES=%d\n\n", MAX_PARALLEL_AXES);
+	fprintf(stderr, "\nCompile options:\n%s", compile_options);
+	fprintf(stderr, "    MAX_PARALLEL_AXES=%d\n\n", MAX_PARALLEL_AXES);
 
 #ifdef X11
 	{
@@ -1081,19 +1108,19 @@ show_version(FILE *fp)
 	}
 
 	{
+#ifndef _WIN32
 	    char *helpfile = NULL;
 
-#ifndef WIN32
 	    if ((helpfile = getenv("GNUHELP")) == NULL)
 		helpfile = HELPFILE;
+	    fprintf(stderr, "HELPFILE           = \"%s\"\n", helpfile);
 #else
-	    helpfile = winhelpname;
+	    fprintf(stderr, "HELPFILE           = \"" TCHARFMT "\"\n", winhelpname);
 #endif
-	fprintf(stderr, "HELPFILE           = \"%s\"\n", helpfile);
 	}
 
-#if defined(WIN32) && !defined(WGP_CONSOLE)
-	fprintf(stderr, "MENUNAME           = \"%s\"\n", szMenuName);
+#if defined(_WIN32) && !defined(WGP_CONSOLE)
+	fprintf(stderr, "MENUNAME           = \"" TCHARFMT "\"\n", szMenuName);
 #endif
 
 #ifdef HAVE_LIBCACA
@@ -1124,12 +1151,9 @@ show_autoscale()
 
     fputs("\tautoscaling is ", stderr);
     if (parametric) {
-	if (is_3d_plot) {
-	    SHOW_AUTOSCALE(T_AXIS);
-	} else {
-	    SHOW_AUTOSCALE(U_AXIS);
-	    SHOW_AUTOSCALE(V_AXIS);
-	}
+	SHOW_AUTOSCALE(T_AXIS);
+	SHOW_AUTOSCALE(U_AXIS);
+	SHOW_AUTOSCALE(V_AXIS);
     }
 
     if (polar) {
@@ -1149,21 +1173,6 @@ show_autoscale()
 }
 
 
-/* process 'show bars' command */
-static void
-show_bars()
-{
-    SHOW_ALL_NL;
-
-    /* I really like this: "terrorbars" ;-) */
-    if (bar_size > 0.0)
-	fprintf(stderr, "\terrorbars are plotted in %s with bars of size %f\n",
-		(bar_layer == LAYER_BACK) ? "back" : "front", bar_size);
-    else
-	fputs("\terrors are plotted without bars\n", stderr);
-}
-
-
 /* process 'show border' command */
 static void
 show_border()
@@ -1173,8 +1182,8 @@ show_border()
     if (!draw_border)
 	fprintf(stderr, "\tborder is not drawn\n");
     else {
-	fprintf(stderr, "\tborder %d is drawn in %s layer with\n\t ",
-	    draw_border, 
+	fprintf(stderr, "\tborder %d (0x%X) is drawn in %s layer with\n\t ",
+	    draw_border, draw_border, 
 	    border_layer == LAYER_BEHIND ? "behind" : border_layer == LAYER_BACK ? "back" : "front");
 	save_linetype(stderr, &border_lp, FALSE);
 	fputc('\n',stderr);
@@ -1270,15 +1279,11 @@ show_clip()
 
     fprintf(stderr, "\tpoint clip is %s\n", (clip_points) ? "ON" : "OFF");
 
-    if (clip_lines1)
-	fputs("\tdrawing and clipping lines between inrange and outrange points\n", stderr);
-    else
-	fputs("\tnot drawing lines between inrange and outrange points\n", stderr);
+    fprintf(stderr, "\t%s lines with one end out of range (clip one)\n",
+	clip_lines1 ? "clipping" : "not drawing");
 
-    if (clip_lines2)
-	fputs("\tdrawing and clipping lines between two outrange points\n", stderr);
-    else
-	fputs("\tnot drawing lines between two outrange points\n", stderr);
+    fprintf(stderr, "\t%s lines with both ends out of range (clip two)\n",
+	clip_lines2 ? "clipping" : "not drawing");
 }
 
 
@@ -1347,6 +1352,11 @@ show_contour()
 		contour_format, clabel_font ? clabel_font : "");
 	fprintf(stderr, "\ton-plot labels placed at segment %d with interval %d\n",
 		clabel_start, clabel_interval);
+	if (contour_firstlinetype > 0)
+		fprintf(stderr, "\tfirst contour linetype will be %d\n", contour_firstlinetype);
+	else
+		fprintf(stderr, "\tfirst contour linetype will be chosen automatically\n");
+	fprintf(stderr, "\tcontour levels will be %ssorted\n", contour_sortlevels ? "" : "un");
     }
 }
 
@@ -1379,13 +1389,13 @@ show_dgrid3d()
     SHOW_ALL_NL;
 
     if (dgrid3d)
-      if( dgrid3d_mode == DGRID3D_QNORM ) {
+      if (dgrid3d_mode == DGRID3D_QNORM) {
 	fprintf(stderr,
 		"\tdata grid3d is enabled for mesh of size %dx%d, norm=%d\n",
 		dgrid3d_row_fineness,
 		dgrid3d_col_fineness,
 		dgrid3d_norm_value );
-      } else if( dgrid3d_mode == DGRID3D_SPLINES ){
+      } else if (dgrid3d_mode == DGRID3D_SPLINES) {
 	fprintf(stderr,
 		"\tdata grid3d is enabled for mesh of size %dx%d, splines\n",
 		dgrid3d_row_fineness,
@@ -1452,20 +1462,13 @@ show_format()
     SHOW_ALL_NL;
 
     fprintf(stderr, "\ttic format is:\n");
-#define SHOW_FORMAT(_axis)						\
-    fprintf(stderr, "\t  %s-axis: \"%s\"%s\n", axis_name(_axis),	\
-	    conv_text(axis_array[_axis].formatstring),			\
-	    axis_array[_axis].tictype == DT_DMS ? " geographic" :	\
-	    axis_array[_axis].tictype == DT_TIMEDATE ? " time" :	\
-	    "");
-    SHOW_FORMAT(FIRST_X_AXIS );
-    SHOW_FORMAT(FIRST_Y_AXIS );
-    SHOW_FORMAT(SECOND_X_AXIS);
-    SHOW_FORMAT(SECOND_Y_AXIS);
-    SHOW_FORMAT(FIRST_Z_AXIS );
-    SHOW_FORMAT(COLOR_AXIS);
-    SHOW_FORMAT(POLAR_AXIS);
-#undef SHOW_FORMAT
+    save_axis_format(stderr, FIRST_X_AXIS );
+    save_axis_format(stderr, FIRST_Y_AXIS );
+    save_axis_format(stderr, SECOND_X_AXIS);
+    save_axis_format(stderr, SECOND_Y_AXIS);
+    save_axis_format(stderr, FIRST_Z_AXIS );
+    save_axis_format(stderr, COLOR_AXIS);
+    save_axis_format(stderr, POLAR_AXIS);
 }
 
 
@@ -1588,7 +1591,7 @@ show_style_circle()
 {
     SHOW_ALL_NL;
     fprintf(stderr, "\tCircle style has default radius ");
-    show_position(&default_circle.o.circle.extent);
+    show_position(&default_circle.o.circle.extent, 1);
     fprintf(stderr, " [%s]", default_circle.o.circle.wedge ? "wedge" : "nowedge");
     fputs("\n", stderr);
 }
@@ -1598,7 +1601,7 @@ show_style_ellipse()
 {
     SHOW_ALL_NL;
     fprintf(stderr, "\tEllipse style has default size ");
-    show_position(&default_ellipse.o.ellipse.extent);
+    show_position(&default_ellipse.o.ellipse.extent, 2);
     fprintf(stderr, ", default angle is %.1f degrees", default_ellipse.o.ellipse.orientation);
 
     switch (default_ellipse.o.ellipse.type) {
@@ -1677,6 +1680,8 @@ show_grid()
     fprintf(stderr, "\n\tMinor grid drawn with");
     save_linetype(stderr, &(mgrid_lp), FALSE);
     fputc('\n', stderr);
+    if (grid_vertical_lines)
+	fprintf(stderr, "\tVertical grid lines in 3D plots\n");
     if (polar_grid_angle)
 	fprintf(stderr, "\tGrid radii drawn every %f %s\n",
 		polar_grid_angle / ang2rad,
@@ -1695,12 +1700,13 @@ static void
 show_paxis()
 {
     int p = int_expression();
-    if (p <=0 || p > MAX_PARALLEL_AXES)
-	int_error(c_token, "expecting parallel axis number 1 - %d",MAX_PARALLEL_AXES);
+    if (p <=0 || p > num_parallel_axes)
+	int_error(c_token, "no such parallel axis is active");
+    fputs("\n\t", stderr);
     if (equals(c_token, "range"))
-	show_range(PARALLEL_AXES+p-1);
+	save_prange(stderr, &parallel_axis[p-1]);
     else if (almost_equals(c_token, "tic$s"))
-	show_ticdef(PARALLEL_AXES+p-1);
+	show_ticdefp(&parallel_axis[p-1]);
     c_token++;
 }
 
@@ -1716,12 +1722,6 @@ show_zeroaxis(AXIS_INDEX axis)
 	fputc('\n',stderr);
     } else
 	fprintf(stderr, "\t%szeroaxis is OFF\n", axis_name(axis));
-
-    if ((axis / SECOND_AXES) == 0) {
-	/* this is a 'first' axis. To output secondary axis, call self
-	 * recursively: */
-	show_zeroaxis(axis + SECOND_AXES);
-    }
 }
 
 /* Show label number <tag> (0 means show all) */
@@ -1738,7 +1738,7 @@ show_label(int tag)
 	    fprintf(stderr, "\tlabel %d \"%s\" at ",
 		    this_label->tag,
 		    (this_label->text==NULL) ? "" : conv_text(this_label->text));
-	    show_position(&this_label->place);
+	    show_position(&this_label->place, 3);
 	    if (this_label->hypertext)
 		fprintf(stderr, " hypertext");
 	    switch (this_label->pos) {
@@ -1772,7 +1772,7 @@ show_label(int tag)
 		fprintf(stderr, " point with color of");
 		save_linetype(stderr, &(this_label->lp_properties), TRUE);
 		fprintf(stderr, " offset ");
-		show_position(&this_label->offset);
+		show_position(&this_label->offset, 3);
 	    }
 
 #ifdef EAM_BOXED_TEXT
@@ -1810,16 +1810,16 @@ show_arrow(int tag)
 		    this_arrow->arrow_properties.layer ? "front" : "back");
 	    save_linetype(stderr, &(this_arrow->arrow_properties.lp_properties), FALSE);
 	    fprintf(stderr, "\n\t  from ");
-	    show_position(&this_arrow->start);
+	    show_position(&this_arrow->start, 3);
 	    if (this_arrow->type == arrow_end_absolute) {
 		fputs(" to ", stderr);
-		show_position(&this_arrow->end);
+		show_position(&this_arrow->end, 3);
 	    } else if (this_arrow->type == arrow_end_relative) {
 		fputs(" rto ", stderr);
-		show_position(&this_arrow->end);
+		show_position(&this_arrow->end, 3);
 	    } else { /* arrow_end_oriented */
 		fputs(" length ", stderr);
-		show_position(&this_arrow->end);
+		show_position(&this_arrow->end, 1);
 		fprintf(stderr," angle %g deg",this_arrow->angle);
 	    }
 	    if (this_arrow->arrow_properties.head_length > 0) {
@@ -1896,7 +1896,7 @@ show_key()
 	    fputs(" horizontal", stderr);
 	}
 	if (key->region == GPKEY_AUTO_INTERIOR_LRTBC)
-	    fputs(" inside", stderr);
+	    fputs(key->fixed ? " fixed" : " inside", stderr);
 	else if (key->region == GPKEY_AUTO_EXTERIOR_LRTBC)
 	    fputs(" outside", stderr);
 	else {
@@ -1920,7 +1920,7 @@ show_key()
     }
     case GPKEY_USER_PLACEMENT:
 	fputs("\tkey is at ", stderr);
-	show_position(&key->user_pos);
+	show_position(&key->user_pos, 2);
 	putc('\n', stderr);
 	break;
     }
@@ -1979,10 +1979,10 @@ show_key()
 
 
 void
-show_position(struct position *pos)
+show_position(struct position *pos, int ndim)
 {
     fprintf(stderr,"(");
-    save_position(stderr, pos, FALSE);
+    save_position(stderr, pos, ndim, FALSE);
     fprintf(stderr,")");
 }
 
@@ -2286,7 +2286,7 @@ show_palette_gradient()
 	return;
     }
 
-    for( i=0; i<sm_palette.gradient_num; ++i ) {
+    for (i=0; i<sm_palette.gradient_num; i++) {
         gray = sm_palette.gradient[i].pos;
         r = sm_palette.gradient[i].col.r;
         g = sm_palette.gradient[i].col.g;
@@ -2336,6 +2336,7 @@ show_palette()
 	    sm_palette.colorMode == SMPAL_COLOR_MODE_GRAY ? "GRAY" : "COLOR");
 
 	switch( sm_palette.colorMode ) {
+	  default:
 	  case SMPAL_COLOR_MODE_GRAY: break;
 	  case SMPAL_COLOR_MODE_RGB:
 	    fprintf(stderr,"\trgb color mapping by rgbformulae are %i,%i,%i\n",
@@ -2362,9 +2363,6 @@ show_palette()
 			sm_palette.cubehelix_start, sm_palette.cubehelix_cycles,
 			sm_palette.cubehelix_saturation);
 	    break;
-	  default:
-	    fprintf( stderr, "%s:%d oops: Unknown color mode '%c'.\n",
-		     __FILE__, __LINE__, (char)(sm_palette.colorMode) );
 	}
 	fprintf(stderr,"\tfigure is %s\n",
 	    sm_palette.positive == SMPAL_POSITIVE ? "POSITIVE" : "NEGATIVE");
@@ -2379,14 +2377,10 @@ show_palette()
 	fputs(" color positions for discrete palette terminals\n", stderr);
 	fputs( "\tColor-Model: ", stderr );
 	switch( sm_palette.cmodel ) {
+	default:
 	case C_MODEL_RGB: fputs( "RGB\n", stderr ); break;
 	case C_MODEL_HSV: fputs( "HSV\n", stderr ); break;
 	case C_MODEL_CMY: fputs( "CMY\n", stderr ); break;
-	case C_MODEL_YIQ: fputs( "YIQ\n", stderr ); break;
-	case C_MODEL_XYZ: fputs( "XYZ\n", stderr ); break;
-	default:
-	  fprintf( stderr, "%s:%d ooops: Unknown color mode '%c'.\n",
-		   __FILE__, __LINE__, (char)(sm_palette.cmodel) );
 	}
 	fprintf(stderr,"\tgamma is %.4g\n", sm_palette.gamma );
 	return;
@@ -2449,9 +2443,9 @@ show_colorbox()
 	    break;
 	case SMCOLOR_BOX_USER:
 	    fputs("at USER origin: ", stderr);
-	    show_position(&color_box.origin);
+	    show_position(&color_box.origin, 2);
 	    fputs("\n\t          size: ", stderr);
-	    show_position(&color_box.size);
+	    show_position(&color_box.size, 2);
 	    fputs("\n", stderr);
 	    break;
 	default: /* should *never* happen */
@@ -2501,6 +2495,8 @@ show_pm3d()
 	fputs("at least 1 point of the quadrangle in x,y ranges\n", stderr);
     else
 	fputs( "all 4 points of the quadrangle in x,y ranges\n", stderr);
+    if (pm3d.no_clipcb)
+	fputs( "\t         quadrangles with cb < cbmin will not be drawn\n", stderr);
     if (pm3d.border.l_type == LT_NODRAW) {
 	fprintf(stderr,"\tpm3d quadrangles will have no border\n");
     } else {
@@ -2508,7 +2504,10 @@ show_pm3d()
 	save_linetype(stderr, &(pm3d.border), FALSE);
 	fprintf(stderr,"\n");
     }
-
+    if (pm3d_shade.strength > 0) {
+	fprintf(stderr,"\tlighting primary component %g specular component %g\n",
+		pm3d_shade.strength, pm3d_shade.spec);
+    }
     fprintf(stderr,"\tsteps for bilinear interpolation: %d,%d\n",
 	 pm3d.interp_i, pm3d.interp_j);
     fprintf(stderr,"\tquadrangle color according to ");
@@ -2541,6 +2540,14 @@ show_pointintervalbox()
     fprintf(stderr, "\tpointintervalbox is %g\n", pointintervalbox);
 }
 
+/* process 'show rgbmax' command */
+static void
+show_rgbmax()
+{
+    SHOW_ALL_NL;
+    fprintf(stderr, "\tRGB image color components are in range [0:%g]\n", rgbmax);
+}
+
 
 /* process 'show encoding' command */
 static void
@@ -2570,6 +2577,16 @@ show_decimalsign()
         fprintf(stderr, "\tdecimalsign for output has default value (normally '.')\n");
 
     fprintf(stderr, "\tdegree sign for output is %s \n", degree_sign);
+}
+
+/* process 'show micro' command */
+static void
+show_micro()
+{
+    SHOW_ALL_NL;
+
+    fprintf(stderr, "\tmicro character for output is %s \n", 
+    	(use_micro && micro) ? micro : "u");
 }
 
 /* process 'show minus_sign' command */
@@ -2644,7 +2661,7 @@ show_fit()
     }
 
     v = get_udv_by_name((char *)FITLIMIT);
-    d = ((v != NULL) && (!v->udv_undef)) ? real(&(v->udv_value)) : -1.0;
+    d = ((v != NULL) && (v->udv_value.type != NOTDEFINED)) ? real(&(v->udv_value)) : -1.0;
     fprintf(stderr, "\tfits will be considered to have converged if  delta chisq < chisq * %g",
 	((d > 0.) && (d < 1.)) ? d : DEF_FIT_LIMIT);
     if (epsilon_abs > 0.)
@@ -2652,19 +2669,19 @@ show_fit()
     fprintf(stderr, "\n");
 
     v = get_udv_by_name((char *)FITMAXITER);
-    if ((v != NULL) && (!v->udv_undef) && (real_int(&(v->udv_value)) > 0))
+    if ((v != NULL) && (v->udv_value.type != NOTDEFINED) && (real_int(&(v->udv_value)) > 0))
 	fprintf(stderr, "\tfit will stop after a maximum of %i iterations\n",
 	        real_int(&(v->udv_value)));
     else
 	fprintf(stderr, "\tfit has no limit in the number of iterations\n");
 
     v = get_udv_by_name((char *)FITSTARTLAMBDA);
-    d = ((v != NULL) && (!v->udv_undef)) ? real(&(v->udv_value)) : -1.0;
+    d = ((v != NULL) && (v->udv_value.type != NOTDEFINED)) ? real(&(v->udv_value)) : -1.0;
     if (d > 0.)
 	fprintf(stderr, "\tfit will start with lambda = %g\n", d);
 
     v = get_udv_by_name((char *)FITLAMBDAFACTOR);
-    d = ((v != NULL) && (!v->udv_undef)) ? real(&(v->udv_value)) : -1.0;
+    d = ((v != NULL) && (v->udv_value.type != NOTDEFINED)) ? real(&(v->udv_value)) : -1.0;
     if (d > 0.)
 	fprintf(stderr, "\tfit will change lambda by a factor of %g\n", d);
 
@@ -2674,7 +2691,7 @@ show_fit()
 	fprintf(stderr, "\tfit will default to `unitweights` if no `error`keyword is given on the command line.\n");
     fprintf(stderr, "\tfit can run the following command when interrupted:\n\t\t'%s'\n", getfitscript());
     v = get_udv_by_name("GPVAL_LAST_FIT");
-    if (v != NULL && !v->udv_undef)
+    if (v != NULL && v->udv_value.type != NOTDEFINED)
 	fprintf(stderr, "\tlast fit command was: %s\n", v->udv_value.v.string_val);
 }
 
@@ -2737,6 +2754,7 @@ show_view()
     fprintf(stderr,"\t\t%s axes are %s\n",
 		aspect_ratio_3D == 2 ? "x/y" : aspect_ratio_3D == 3 ? "x/y/z" : "",
 		aspect_ratio_3D >= 2 ? "on the same scale" : "independently scaled");
+    fprintf(stderr, "\t\t azimuth %g\n", azimuth);
 }
 
 
@@ -2782,11 +2800,8 @@ show_histogram()
 static void
 show_textbox()
 {
-	fprintf(stderr, "\ttextboxes are %s ",
-		textbox_opts.opaque ? "opaque" : "transparent");
-	fprintf(stderr, "with margins %4.1f, %4.1f  and %s border\n",
-		textbox_opts.xmargin, textbox_opts.ymargin,
-		textbox_opts.noborder ? "no" : "");
+    fprintf(stderr, "\ttextbox style");
+    save_style_textbox(stderr);
 }
 #endif
 
@@ -2853,11 +2868,6 @@ show_tics(
     int i;
     SHOW_ALL_NL;
 
-    if (xyplane.absolute)
-	fprintf(stderr, "\txyplane intercepts z axis at %g\n", xyplane.z);
-    else
-	fprintf(stderr, "\txyplane ticslevel is %g\n", xyplane.z);
-
     fprintf(stderr, "\ttics are in %s of plot\n", (grid_tics_in_front) ? "front" : "back");
 
     if (showx)
@@ -2883,24 +2893,27 @@ show_tics(
 
 /* process 'show m[xyzx2y2cb]tics' commands */
 static void
-show_mtics(AXIS_INDEX axis)
+show_mtics(struct axis *axis)
 {
-    switch (axis_array[axis].minitics) {
+    char *name = axis_name(axis->index);
+
+    switch (axis->minitics) {
     case MINI_OFF:
-	fprintf(stderr, "\tminor %stics are off\n", axis_name(axis));
+	fprintf(stderr, "\tminor %stics are off\n", name);
 	break;
     case MINI_DEFAULT:
 	fprintf(stderr, "\
 \tminor %stics are off for linear scales\n\
-\tminor %stics are computed automatically for log scales\n", axis_name(axis), axis_name(axis));
+\tminor %stics are computed automatically for log scales\n", 
+	name, name);
 	break;
     case MINI_AUTO:
-	fprintf(stderr, "\tminor %stics are computed automatically\n", axis_name(axis));
+	fprintf(stderr, "\tminor %stics are computed automatically\n", name);
 	break;
     case MINI_USER:
 	fprintf(stderr, "\
 \tminor %stics are drawn with %d subintervals between major xtic marks\n",
-		axis_name(axis), (int) axis_array[axis].mtic_freq);
+		name, (int) axis->mtic_freq);
 	break;
     default:
 	int_error(NO_CARET, "Unknown minitic type in show_mtics()");
@@ -2916,10 +2929,6 @@ show_timestamp()
     show_xyzlabel("", "time", &timelabel);
     fprintf(stderr, "\twritten in %s corner\n",
 	    (timelabel_bottom ? "bottom" : "top"));
-    if (timelabel_rotate)
-	fputs("\trotated if the terminal allows it\n\t", stderr);
-    else
-	fputs("\tnot rotated\n\t", stderr);
 }
 
 
@@ -2931,7 +2940,7 @@ show_range(AXIS_INDEX axis)
     if (axis_array[axis].datatype == DT_TIMEDATE)
 	fprintf(stderr, "\tset %sdata time\n", axis_name(axis));
     fprintf(stderr,"\t");
-    save_range(stderr, axis);
+    save_prange(stderr, axis_array + axis);
 }
 
 
@@ -2942,7 +2951,10 @@ show_xyzlabel(const char *name, const char *suffix, text_label *label)
     if (label) {
 	fprintf(stderr, "\t%s%s is \"%s\", offset at ", name, suffix,
 	    label->text ? conv_text(label->text) : "");
-	show_position(&label->offset);
+	show_position(&label->offset, 3);
+	fprintf(stderr, label->pos == LEFT ? " left justified"
+			: label->pos == RIGHT ? " right justified"
+			: "");
     } else
 	return;
 
@@ -3008,13 +3020,20 @@ static void
 show_link()
 {
     if (END_OF_COMMAND || almost_equals(c_token,"x$2"))
-	if (axis_array[SECOND_X_AXIS].linked_to_primary)
-	    save_range(stderr, SECOND_X_AXIS);
+	    save_link(stderr, axis_array + SECOND_X_AXIS);
     if (END_OF_COMMAND || almost_equals(c_token,"y$2"))
-	if (axis_array[SECOND_Y_AXIS].linked_to_primary)
-	    save_range(stderr, SECOND_Y_AXIS);
+	    save_link(stderr, axis_array + SECOND_Y_AXIS);
     if (!END_OF_COMMAND)
 	c_token++;
+}
+
+/* process 'show link' command */
+static void
+show_nonlinear()
+{
+    int axis;
+    for (axis = 0; axis < NUMBER_OF_MAIN_VISIBLE_AXES; axis++)
+	save_nonlinear(stderr, &axis_array[axis]);
 }
 
 /* process 'show locale' command */
@@ -3022,7 +3041,7 @@ static void
 show_locale()
 {
     SHOW_ALL_NL;
-    locale_handler(ACTION_SHOW,NULL);
+    dump_locale();
 }
 
 
@@ -3031,7 +3050,7 @@ static void
 show_loadpath()
 {
     SHOW_ALL_NL;
-    loadpath_handler(ACTION_SHOW,NULL);
+    dump_loadpath();
 }
 
 
@@ -3040,7 +3059,7 @@ static void
 show_fontpath()
 {
     SHOW_ALL_NL;
-    fontpath_handler(ACTION_SHOW,NULL);
+    dump_fontpath();
 }
 
 
@@ -3062,6 +3081,8 @@ show_datafile()
     if (END_OF_COMMAND || almost_equals(c_token,"miss$ing")) {
 	if (missing_val == NULL)
 	    fputs("\tNo missing data string set for datafile\n", stderr);
+	else if (!strcmp(missing_val,"NaN"))
+	    fprintf(stderr,"\tall NaN (not-a-number) values will be treated as missing data\n");
 	else
 	    fprintf(stderr, "\t\"%s\" in datafile is interpreted as missing value\n",
 		missing_val);
@@ -3102,11 +3123,28 @@ show_datafile()
 	c_token++;
 }
 
-#ifdef USE_MOUSE
+/* process 'show table' command */
+static void
+show_table()
+{
+    char foo[2] = {0,0};
+    foo[0] = (table_sep && *table_sep) ? *table_sep : '\t';
+    SHOW_ALL_NL;
+    if (table_mode)
+	fprintf(stderr, "\ttable mode is on, field separator %s\n",
+		foo[0] == '\t' ? "tab" :
+		foo[0] == ',' ? "comma" :
+		foo[0] == ' ' ? "whitespace" :
+		foo);
+    else
+	fprintf(stderr, "\ttable mode is off\n");
+}
+
 /* process 'show mouse' command */
 static void
 show_mouse()
 {
+#ifdef USE_MOUSE
     SHOW_ALL_NL;
     if (mouse_setting.on) {
 	fprintf(stderr, "\tmouse is on\n");
@@ -3148,8 +3186,10 @@ show_mouse()
     } else {
 	fprintf(stderr, "\tmouse is off\n");
     }
+#else  /* USE_MOUSE */
+    int_warn(NO_CARET, "this copy of gnuplot has no mouse support");
+#endif /* USE_MOUSE */
 }
-#endif
 
 /* process 'show plot' command */
 static void
@@ -3194,7 +3234,7 @@ show_variables()
 	    udv = udv->next_udv;
 	    continue;
 	}
-	if (udv->udv_undef) {
+	if (udv->udv_value.type == NOTDEFINED) {
 	    FPRINTF((stderr, "\t%-*s is undefined\n", len, udv->udv_name));
 	} else {
 	    fprintf(stderr, "\t%-*s ", len, udv->udv_name);
@@ -3273,9 +3313,7 @@ show_arrowstyle(int tag)
 	    fflush(stderr);
 
 	    fprintf(stderr, "\t %s %s",
-		    this_arrowstyle->arrow_properties.head ?
-		    (this_arrowstyle->arrow_properties.head==2 ?
-		     " both heads " : " one head ") : " nohead",
+		    arrow_head_names[this_arrowstyle->arrow_properties.head],
 		    this_arrowstyle->arrow_properties.layer ? "front" : "back");
 	    save_linetype(stderr, &(this_arrowstyle->arrow_properties.lp_properties), FALSE);
 	    fputc('\n', stderr);
@@ -3314,40 +3352,40 @@ show_arrowstyle(int tag)
 
 /* called by show_tics */
 static void
-show_ticdef(AXIS_INDEX axis)
+show_ticdefp(struct axis *this_axis)
 {
     struct ticmark *t;
 
-    const char *ticfmt = conv_text(axis_array[axis].formatstring);
+    const char *ticfmt = conv_text(this_axis->formatstring);
 
     fprintf(stderr, "\t%s-axis tics are %s, \
 \tmajor ticscale is %g and minor ticscale is %g\n",
-	    axis_name(axis),
-	    (axis_array[axis].tic_in ? "IN" : "OUT"),
-	    axis_array[axis].ticscale, axis_array[axis].miniticscale);
+	    axis_name(this_axis->index),
+	    (this_axis->tic_in ? "IN" : "OUT"),
+	    this_axis->ticscale, this_axis->miniticscale);
 
-    fprintf(stderr, "\t%s-axis tics:\t", axis_name(axis));
-    switch (axis_array[axis].ticmode & TICS_MASK) {
+    fprintf(stderr, "\t%s-axis tics:\t", axis_name(this_axis->index));
+    switch (this_axis->ticmode & TICS_MASK) {
     case NO_TICS:
 	fputs("OFF\n", stderr);
 	return;
     case TICS_ON_AXIS:
 	fputs("on axis", stderr);
-	if (axis_array[axis].ticmode & TICS_MIRROR)
-	    fprintf(stderr, " and mirrored %s", (axis_array[axis].tic_in ? "OUT" : "IN"));
+	if (this_axis->ticmode & TICS_MIRROR)
+	    fprintf(stderr, " and mirrored %s", (this_axis->tic_in ? "OUT" : "IN"));
 	break;
     case TICS_ON_BORDER:
 	fputs("on border", stderr);
-	if (axis_array[axis].ticmode & TICS_MIRROR)
+	if (this_axis->ticmode & TICS_MIRROR)
 	    fputs(" and mirrored on opposite border", stderr);
 	break;
     }
 
-    if (axis_array[axis].ticdef.rangelimited)
+    if (this_axis->ticdef.rangelimited)
 	fprintf(stderr, "\n\t  tics are limited to data range");
     fputs("\n\t  labels are ", stderr);
-    if (axis_array[axis].manual_justify) {
-    	switch (axis_array[axis].label.pos) {
+    if (this_axis->manual_justify) {
+    	switch (this_axis->tic_pos) {
     	case LEFT:{
 		fputs("left justified, ", stderr);
 		break;
@@ -3365,22 +3403,22 @@ show_ticdef(AXIS_INDEX axis)
         fputs("justified automatically, ", stderr);
     fprintf(stderr, "format \"%s\"", ticfmt);
     fprintf(stderr, "%s", 
-	axis_array[axis].tictype == DT_DMS ? " geographic" :
-	axis_array[axis].tictype == DT_TIMEDATE ? " timedate" :
+	this_axis->tictype == DT_DMS ? " geographic" :
+	this_axis->tictype == DT_TIMEDATE ? " timedate" :
 	"");
-    if (axis_array[axis].ticdef.enhanced == FALSE)
+    if (this_axis->ticdef.enhanced == FALSE)
 	fprintf(stderr,"  noenhanced");
-    if (axis_array[axis].tic_rotate) {
+    if (this_axis->tic_rotate) {
 	fprintf(stderr," rotated");
-	fprintf(stderr," by %d",axis_array[axis].tic_rotate);
+	fprintf(stderr," by %d",this_axis->tic_rotate);
 	fputs(" in 2D mode, terminal permitting,\n\t", stderr);
     } else
 	fputs(" and are not rotated,\n\t", stderr);
     fputs("    offset ",stderr);
-    show_position(&axis_array[axis].ticdef.offset);
+    show_position(&this_axis->ticdef.offset, 3);
     fputs("\n\t",stderr);
 
-    switch (axis_array[axis].ticdef.type) {
+    switch (this_axis->ticdef.type) {
     case TIC_COMPUTED:{
 	    fputs("  intervals computed automatically\n", stderr);
 	    break;
@@ -3395,15 +3433,15 @@ show_ticdef(AXIS_INDEX axis)
 	}
     case TIC_SERIES:{
 	    fputs("  series", stderr);
-	    if (axis_array[axis].ticdef.def.series.start != -VERYLARGE) {
+	    if (this_axis->ticdef.def.series.start != -VERYLARGE) {
 		fputs(" from ", stderr);
-		SHOW_NUM_OR_TIME(axis_array[axis].ticdef.def.series.start, axis);
+		save_num_or_time_input(stderr, this_axis->ticdef.def.series.start, this_axis);
 	    }
-	    fprintf(stderr, " by %g%s", axis_array[axis].ticdef.def.series.incr,
-		    axis_array[axis].datatype == DT_TIMEDATE ? " secs" : "");
-	    if (axis_array[axis].ticdef.def.series.end != VERYLARGE) {
+	    fprintf(stderr, " by %g%s", this_axis->ticdef.def.series.incr,
+		    this_axis->datatype == DT_TIMEDATE ? " secs" : "");
+	    if (this_axis->ticdef.def.series.end != VERYLARGE) {
 		fputs(" until ", stderr);
-		SHOW_NUM_OR_TIME(axis_array[axis].ticdef.def.series.end, axis);
+		save_num_or_time_input(stderr, this_axis->ticdef.def.series.end, this_axis);
 	    }
 	    putc('\n', stderr);
 	    break;
@@ -3418,12 +3456,12 @@ show_ticdef(AXIS_INDEX axis)
 	}
     }
 
-    if (axis_array[axis].ticdef.def.user) {
+    if (this_axis->ticdef.def.user) {
 	fputs("\t  explicit list (", stderr);
-	for (t = axis_array[axis].ticdef.def.user; t != NULL; t = t->next) {
+	for (t = this_axis->ticdef.def.user; t != NULL; t = t->next) {
 	    if (t->label)
 		fprintf(stderr, "\"%s\" ", conv_text(t->label));
-	    SHOW_NUM_OR_TIME(t->position, axis);
+	    save_num_or_time_input(stderr, t->position, this_axis);
 	    if (t->level)
 		fprintf(stderr," %d",t->level);
 	    if (t->next)
@@ -3432,15 +3470,22 @@ show_ticdef(AXIS_INDEX axis)
 	fputs(")\n", stderr);
     }
 
-    if (axis_array[axis].ticdef.textcolor.type != TC_DEFAULT) {
+    if (this_axis->ticdef.textcolor.type != TC_DEFAULT) {
         fputs("\t ", stderr);
-	save_textcolor(stderr, &axis_array[axis].ticdef.textcolor);
+	save_textcolor(stderr, &this_axis->ticdef.textcolor);
         fputs("\n", stderr);
     }
 
-    if (axis_array[axis].ticdef.font && *axis_array[axis].ticdef.font) {
-        fprintf(stderr,"\t  font \"%s\"\n", axis_array[axis].ticdef.font);
+    if (this_axis->ticdef.font && *this_axis->ticdef.font) {
+        fprintf(stderr,"\t  font \"%s\"\n", this_axis->ticdef.font);
     }
+}
+
+/* called by show_tics */
+static void
+show_ticdef(AXIS_INDEX axis)
+{
+    show_ticdefp(&axis_array[axis]);
 }
 
 /* Display a value in human-readable form. */

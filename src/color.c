@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: color.c,v 1.114.2.2 2016/08/27 20:50:12 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - color.c */
 
 /*[
@@ -51,7 +47,7 @@ static t_sm_palette prev_palette = {
 
 static void draw_inside_color_smooth_box_postscript __PROTO((void));
 static void draw_inside_color_smooth_box_bitmap __PROTO((void));
-void cbtick_callback __PROTO((AXIS_INDEX axis, double place, char *text, int ticlevel,
+static void cbtick_callback __PROTO((struct axis *, double place, char *text, int ticlevel,
 			struct lp_style_type grid, struct ticmark *userlabels));
 
 
@@ -191,7 +187,7 @@ set_rgbcolor_var(unsigned int rgbvalue)
     color.type = TC_RGB;
     *(unsigned int *)(&color.lt) = rgbvalue;
     color.value = -1;	/* -1 flags that this came from "rgb variable" */
-    apply_pm3dcolor(&color, term);
+    apply_pm3dcolor(&color);
 }
 
 void
@@ -201,7 +197,7 @@ set_rgbcolor_const(unsigned int rgbvalue)
     color.type = TC_RGB;
     *(unsigned int *)(&color.lt) = rgbvalue;
     color.value = 0;	/* 0 flags that this is a constant color */
-    apply_pm3dcolor(&color, term);
+    apply_pm3dcolor(&color);
 }
 
 void
@@ -216,9 +212,13 @@ ifilled_quadrangle(gpiPoint* icorners)
     if (pm3d.border.l_type != LT_NODRAW) {
 	int i;
 
-	/* It should be sufficient to set only the color, but for some */
-	/* reason this causes the svg terminal to lose the fill type.  */
-	term_apply_lp_properties(&pm3d_border_lp);
+	/* LT_DEFAULT means draw border in current color */
+	/* FIXME: currently there is no obvious way to set LT_DEFAULT  */
+	if (pm3d.border.l_type != LT_DEFAULT) {
+	    /* It should be sufficient to set only the color, but for some */
+	    /* reason this causes the svg terminal to lose the fill type.  */
+	    term_apply_lp_properties(&pm3d_border_lp);
+	}
 
 	term->move(icorners[0].x, icorners[0].y);
 	for (i = 3; i >= 0; i--) {
@@ -427,22 +427,29 @@ draw_inside_color_smooth_box_bitmap()
     }
 }
 
-/* Notice HBB 20010720: would be static, but HP-UX gcc bug forbids
- * this, for now */
-void
+static void
 cbtick_callback(
-    AXIS_INDEX axis,
+    struct axis *this_axis,
     double place,
     char *text,
     int ticlevel,
     struct lp_style_type grid, /* linetype or -2 for no grid */
     struct ticmark *userlabels)
 {
-    int len = TIC_SCALE(ticlevel, COLOR_AXIS)
-	* (CB_AXIS.tic_in ? -1 : 1) * (term->h_tic);
-    double cb_place = (place - CB_AXIS.min) / (CB_AXIS.max - CB_AXIS.min);
-	/* relative z position along the colorbox axis */
+    int len = tic_scale(ticlevel, this_axis)
+	* (this_axis->tic_in ? -1 : 1) * (term->h_tic);
     unsigned int x1, y1, x2, y2;
+    double cb_place;
+
+    /* position of tic as a fraction of the full palette range */
+#ifdef NONLINEAR_AXES
+    if (this_axis->linked_to_primary) {
+	AXIS * primary = this_axis->linked_to_primary;
+	place = eval_link_function(primary, place);
+	cb_place = (place - primary->min) / (primary->max - primary->min);
+    } else 
+#endif
+    cb_place = (place - this_axis->min) / (this_axis->max - this_axis->min);
 
     /* calculate tic position */
     if (color_box.rotation == 'h') {
@@ -490,43 +497,43 @@ cbtick_callback(
 #	undef MINIMUM_SEPARATION
 
 	/* get offset */
-	map3d_position_r(&(axis_array[axis].ticdef.offset),
+	map3d_position_r(&(this_axis->ticdef.offset),
 			 &offsetx, &offsety, "cbtics");
 	/* User-specified different color for the tics text */
-	if (axis_array[axis].ticdef.textcolor.type != TC_DEFAULT)
-	    apply_pm3dcolor(&(axis_array[axis].ticdef.textcolor), term);
+	if (this_axis->ticdef.textcolor.type != TC_DEFAULT)
+	    apply_pm3dcolor(&(this_axis->ticdef.textcolor));
 	if (color_box.rotation == 'h') {
 	    int y3 = color_box.bounds.ybot - (term->v_char);
 	    int hrotate = 0;
 
-	    if (axis_array[axis].tic_rotate
-		&& (*term->text_angle)(axis_array[axis].tic_rotate))
-		    hrotate = axis_array[axis].tic_rotate;
+	    if (this_axis->tic_rotate
+		&& (*term->text_angle)(this_axis->tic_rotate))
+		    hrotate = this_axis->tic_rotate;
 	    if (len > 0) y3 -= len; /* add outer tics len */
 	    if (y3<0) y3 = 0;
 	    just = hrotate ? LEFT : CENTRE;
-	    if (axis_array[axis].manual_justify)
-		just = axis_array[axis].label.pos;
+	    if (this_axis->manual_justify)
+		just = this_axis->tic_pos;
 	    write_multiline(x2+offsetx, y3+offsety, text,
 			    just, JUST_CENTRE, hrotate,
-			    axis_array[axis].ticdef.font);
+			    this_axis->ticdef.font);
 	    if (hrotate)
 		(*term->text_angle)(0);
 	} else {
 	    unsigned int x3 = color_box.bounds.xright + (term->h_char);
 	    if (len > 0) x3 += len; /* add outer tics len */
 	    just = LEFT;
-	    if (axis_array[axis].manual_justify)
-		just = axis_array[axis].label.pos;	    
+	    if (this_axis->manual_justify)
+		just = this_axis->tic_pos;	    
 	    write_multiline(x3+offsetx, y2+offsety, text,
 			    just, JUST_CENTRE, 0.0,
-			    axis_array[axis].ticdef.font);
+			    this_axis->ticdef.font);
 	}
 	term_apply_lp_properties(&border_lp);	/* border linetype */
     }
 
     /* draw tic on the mirror side */
-    if (CB_AXIS.ticmode & TICS_MIRROR) {
+    if (this_axis->ticmode & TICS_MIRROR) {
 	if (color_box.rotation == 'h') {
 	    y1 = color_box.bounds.ytop;
 	    y2 = color_box.bounds.ytop + len;
@@ -585,20 +592,13 @@ draw_color_smooth_box(int plot_mode)
 
     } else { /* color_box.where == SMCOLOR_BOX_DEFAULT */
 	if (plot_mode == MODE_SPLOT && !splot_map) {
-	    /* HBB 20031215: new code.  Constants fixed to what the result
-	     * of the old code in default view (set view 60,30,1,1)
-	     * happened to be. Somebody fix them if they're not right! */
+	    /* general 3D plot */
 	    color_box.bounds.xleft = xmiddle + 0.709 * xscaler;
 	    color_box.bounds.xright   = xmiddle + 0.778 * xscaler;
 	    color_box.bounds.ybot = ymiddle - 0.147 * yscaler;
 	    color_box.bounds.ytop   = ymiddle + 0.497 * yscaler;
-
-	} else if (is_3d_plot) {
-	    /* MWS 09-Dec-05, make color box full size for splot maps. */
-	    double dx = (X_AXIS.max - X_AXIS.min);
-	    map3d_xy(X_AXIS.max + dx * 0.025, Y_AXIS.min, base_z, &color_box.bounds.xleft, &color_box.bounds.ybot);
-	    map3d_xy(X_AXIS.max + dx * 0.075, Y_AXIS.max, ceiling_z, &color_box.bounds.xright, &color_box.bounds.ytop);
-	} else { /* 2D plot */
+	} else {
+	    /* 2D plot (including splot map) */
 	    struct position default_origin = {graph,graph,graph, 1.025, 0, 0};
 	    struct position default_size = {graph,graph,graph, 0.05, 1.0, 0};
 	    double xtemp, ytemp;
@@ -638,11 +638,15 @@ draw_color_smooth_box(int plot_mode)
 	color_box.bounds.ybot = tmp;
     }
 
+    term->layer(TERM_LAYER_BEGIN_COLORBOX);
+
     /* The PostScript terminal has an Optimized version */
     if ((term->flags & TERM_IS_POSTSCRIPT) != 0)
 	draw_inside_color_smooth_box_postscript();
     else
 	draw_inside_color_smooth_box_bitmap();
+
+    term->layer(TERM_LAYER_END_COLORBOX);
 
     if (color_box.border) {
 	/* now make boundary around the colour box */
@@ -670,54 +674,39 @@ draw_color_smooth_box(int plot_mode)
     /* draw tics */
     if (axis_array[COLOR_AXIS].ticmode) {
 	term_apply_lp_properties(&border_lp); /* border linetype */
-	gen_tics(COLOR_AXIS, cbtick_callback );
+	gen_tics(&axis_array[COLOR_AXIS], cbtick_callback );
     }
 
     /* write the colour box label */
     if (CB_AXIS.label.text) {
 	int x, y;
-	apply_pm3dcolor(&(CB_AXIS.label.textcolor),term);
+	int len;
+	int save_rotation = CB_AXIS.label.rotate;
+	apply_pm3dcolor(&(CB_AXIS.label.textcolor));
 	if (color_box.rotation == 'h') {
-	    int len = CB_AXIS.ticscale * (CB_AXIS.tic_in ? 1 : -1) * 
-		(term->v_tic);
+	    len = CB_AXIS.ticscale * (CB_AXIS.tic_in ? 1 : -1) * (term->v_tic);
 
-	    map3d_position_r(&(CB_AXIS.label.offset), &x, &y, "smooth_box");
-	    x += (color_box.bounds.xleft + color_box.bounds.xright) / 2;
+	    x = (color_box.bounds.xleft + color_box.bounds.xright) / 2;
+	    y = color_box.bounds.ybot - 2.7 * term->v_char;
 
-#define DEFAULT_Y_DISTANCE 1.0
-	    y += color_box.bounds.ybot + (- DEFAULT_Y_DISTANCE - 1.7) * term->v_char;
-#undef DEFAULT_Y_DISTANCE
 	    if (len < 0) y += len;
-	    if (x<0) x = 0;
-	    if (y<0) y = 0;
-	    write_multiline(x, y, CB_AXIS.label.text, CENTRE, JUST_CENTRE, 0,
-			    CB_AXIS.label.font);
+	    if (CB_AXIS.label.rotate == TEXT_VERTICAL)
+		CB_AXIS.label.rotate = 0;
 	} else {
-	    int len = CB_AXIS.ticscale * (CB_AXIS.tic_in ? -1 : 1) *
-		(term->h_tic);
+	    len = CB_AXIS.ticscale * (CB_AXIS.tic_in ? -1 : 1) * (term->h_tic);
 	    /* calculate max length of cb-tics labels */
 	    widest_tic_strlen = 0;
-	    if (CB_AXIS.ticmode & TICS_ON_BORDER) {
-	      	widest_tic_strlen = 0; /* reset the global variable */
-		gen_tics(COLOR_AXIS, /* 0, */ widest_tic_callback);
-	    }
-	    map3d_position_r(&(CB_AXIS.label.offset), &x, &y, "smooth_box");
-#define DEFAULT_X_DISTANCE 0.0
-	    x += color_box.bounds.xright + (widest_tic_strlen + DEFAULT_X_DISTANCE + 1.5) * term->h_char;
-#undef DEFAULT_X_DISTANCE
+	    if (CB_AXIS.ticmode & TICS_ON_BORDER) /* Recalculate widest_tic_strlen */
+		gen_tics(&axis_array[COLOR_AXIS], widest_tic_callback);
+	    x = color_box.bounds.xright + (widest_tic_strlen + 1.5) * term->h_char;
 	    if (len > 0) x += len;
-	    y += (color_box.bounds.ybot + color_box.bounds.ytop) / 2;
-	    if (x<0) x = 0;
-	    if (y<0) y = 0;
-	    if ((*term->text_angle)(CB_AXIS.label.rotate)) {
-		write_multiline(x, y, CB_AXIS.label.text, CENTRE, JUST_TOP,
-				CB_AXIS.label.rotate, CB_AXIS.label.font);
-		(*term->text_angle)(0);
-	    } else {
-		write_multiline(x, y, CB_AXIS.label.text, LEFT, JUST_TOP, 0, CB_AXIS.label.font);
-	    }
+	    y = (color_box.bounds.ybot + color_box.bounds.ytop) / 2;
 	}
-	reset_textcolor(&(CB_AXIS.label.textcolor),term);
+	if (x<0) x = 0;
+	if (y<0) y = 0;
+	write_label(x, y, &(CB_AXIS.label));
+	reset_textcolor(&(CB_AXIS.label.textcolor));
+	CB_AXIS.label.rotate = save_rotation;
     }
 
 }

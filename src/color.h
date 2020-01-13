@@ -1,5 +1,5 @@
 /*
- * $Id: color.h,v 1.40 2013/10/21 22:31:59 sfeam Exp $
+ * $Id: color.h,v 1.39 2013/09/25 22:21:26 sfeam Exp $
  */
 
 /* GNUPLOT - color.h */

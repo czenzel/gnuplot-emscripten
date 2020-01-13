@@ -1,5 +1,5 @@
 /*
- * $Id: winmain.h,v 1.15 2014/06/04 08:11:00 markisch Exp $
+ * $Id: winmain.h,v 1.19 2016/08/05 05:10:29 markisch Exp $
  */
 
 /* GNUPLOT - win/winmain.h */
@@ -46,7 +46,13 @@
 #ifndef GNUPLOT_WINMAIN_H
 #define GNUPLOT_WINMAIN_H
 
+#include <tchar.h>
+#include <wchar.h>
 #include "wgnuplib.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 extern TW textwin;
 extern LPGW graphwin;
@@ -55,21 +61,31 @@ extern PW pausewin;
 extern MW menuwin;
 
 extern HWND help_window;
-extern LPSTR winhelpname;
-extern LPSTR szModuleName;
-extern LPSTR szPackageDir;
-extern LPSTR szMenuName;
+extern LPTSTR winhelpname;
+extern LPTSTR szMenuName;
 
-int Pause __PROTO((LPSTR str));
-void screen_dump __PROTO((void));
-void kill_pending_Pause_dialog __PROTO((void));
-void win_sleep __PROTO((DWORD dwMilliSeconds));
+int Pause (LPSTR str);
+void screen_dump(void);
+void kill_pending_Pause_dialog(void);
+void win_sleep(DWORD dwMilliSeconds);
 TBOOLEAN WinAnyWindowOpen(void);
 void WinPersistTextClose(void);
 void WinMessageLoop(void);
 void WinRaiseConsole(void);
+UINT WinGetCodepage(enum set_encoding_id encoding);
+enum set_encoding_id WinGetEncoding(UINT cp);
+LPWSTR UnicodeText(LPCSTR str, enum set_encoding_id encoding);
+LPSTR AnsiText(LPCWSTR strw,  enum set_encoding_id encoding);
+void MultiByteAccumulate(BYTE ch, LPWSTR wstr, int * count);
+LPSTR RelativePathToGnuplot(const char * path);
 
-int ConsoleReadCh();
+int ConsoleReadCh(void);
 DWORD WINAPI stdin_pipe_reader(LPVOID param);
+
+UINT GetDPI(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* GNUPLOT_WINMAIN_H */

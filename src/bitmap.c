@@ -1184,11 +1184,11 @@ b_boxfill(
     /* will implement a more efficient solution */
 
     bitoffs=0;
-    for( iy = y; iy < y+h; iy ++ ) { /* box height */
+    for (iy = y; iy < y+h; iy++) { /* box height */
 	pat = fillbitmap[bitoffs % fill_bitmap_width];
 	bitoffs++;
 	mask = 1 << (fill_bitmap_width - 1);
-	for(ix = x; ix < x+w; ix ++) { /* box width */
+	for (ix = x; ix < x+w; ix++) { /* box width */
 	    /* actual pixel = 0 or color, according to pattern */
 	    actpix = (pat & mask) ? pixcolor : 0;
 	    mask >>= 1;

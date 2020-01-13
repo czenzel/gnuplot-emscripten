@@ -1,5 +1,5 @@
 /*
- * $Id: stats.h,v 1.1 2011/10/03 00:17:22 sfeam Exp $
+ * $Id: stats.h,v 1.5 2009/11/15 18:34:44 v923z Exp $
  */
 
 /* GNUPLOT - stats.h */

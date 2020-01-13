@@ -81,8 +81,8 @@ DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/alpha.m4 \
 	$(top_srcdir)/m4/apple.m4 $(top_srcdir)/m4/beos.m4 \
-	$(top_srcdir)/m4/msdos.m4 $(top_srcdir)/m4/next.m4 \
-	$(top_srcdir)/m4/pkg.m4 $(top_srcdir)/configure.in
+	$(top_srcdir)/m4/msdos.m4 $(top_srcdir)/m4/pkg.m4 \
+	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 mkinstalldirs = $(SHELL) $(top_srcdir)/mkinstalldirs
@@ -199,6 +199,7 @@ LINUXSUID = @LINUXSUID@
 LN_S = @LN_S@
 LRELEASE = @LRELEASE@
 LTLIBOBJS = @LTLIBOBJS@
+LUA = @LUA@
 LUA_CFLAGS = @LUA_CFLAGS@
 LUA_LIBS = @LUA_LIBS@
 MAINT = @MAINT@
@@ -216,11 +217,9 @@ PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
 PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
-PANGO_1_10_2_CFLAGS = @PANGO_1_10_2_CFLAGS@
-PANGO_1_10_2_LIBS = @PANGO_1_10_2_LIBS@
+PATCHLEVEL = @PATCHLEVEL@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 PDFLATEX = @PDFLATEX@
-PDFLIB_CONFIG = @PDFLIB_CONFIG@
 PKG_CONFIG = @PKG_CONFIG@
 PLAINTEX = @PLAINTEX@
 QT_CFLAGS = @QT_CFLAGS@

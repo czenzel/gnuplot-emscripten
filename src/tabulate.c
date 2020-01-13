@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: tabulate.c,v 1.22.2.2 2016/09/06 17:07:27 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - tabulate.c */
 
 /*[
@@ -62,6 +58,7 @@ static char *RCSid() { return RCSid("$Id: tabulate.c,v 1.22.2.2 2016/09/06 17:07
 FILE *table_outfile = NULL;
 udvt_entry *table_var = NULL;
 TBOOLEAN table_mode = FALSE;
+char *table_sep = NULL;
 
 static char *expand_newline __PROTO((const char *in));
 static TBOOLEAN imploded __PROTO((curve_points *this_plot));
@@ -94,9 +91,11 @@ output_number(double coord, int axis, char *buffer) {
 	    gstrftime(buffer+1, BUFFERSIZE-1, axis_array[axis].formatstring, coord);
 	while (strchr(buffer,'\n')) {*(strchr(buffer,'\n')) = ' ';}
 	strcat(buffer,"\"");
+#if !defined(NONLINEAR_AXES) || (NONLINEAR_AXES == 0)
     } else if (axis_array[axis].log) {
 	double x = pow(axis_array[axis].base, coord);
 	gprintf(buffer, BUFFERSIZE, axis_array[axis].formatstring, 1.0, x);
+#endif
     } else
 	gprintf(buffer, BUFFERSIZE, axis_array[axis].formatstring, 1.0, coord);
     strcat(buffer, " ");
@@ -402,8 +401,12 @@ print_3dtable(int pcount)
 	case IMPULSES:
 	case DOTS:
 	case VECTOR:
-	case IMAGE:
 	    break;
+	case IMAGE:
+	case RGBIMAGE:
+	case RGBA_IMAGE:
+	    break;
+
 	default:
 	    fprintf(stderr, "Tabular output of this 3D plot style not implemented\n");
 	    continue;
@@ -423,11 +426,22 @@ print_3dtable(int pcount)
 			curve, icrvs->p_count);
 		print_line(line);
 		len = sprintf(line, "# x y z");
-		if (this_plot->plot_style == VECTOR) {
+		tail = NULL;  /* Just to shut up a compiler warning */
+
+		switch (this_plot->plot_style) {
+		case VECTOR:
 		    tail = icrvs->next->points;
 		    len = strappend(&line, &size, len, " delta_x delta_y delta_z");
-		} else {
-		    tail = NULL;  /* Just to shut up a compiler warning */
+		    break;
+		case IMAGE:
+		    len = strappend(&line, &size, len, "  pixel");
+		    break;
+		case RGBIMAGE:
+		case RGBA_IMAGE:
+		    len = strappend(&line, &size, len, "  red green blue alpha");
+		    break;
+		default:
+		    break;
 		}
 
 		strappend(&line, &size, len, " type");
@@ -449,6 +463,12 @@ print_3dtable(int pcount)
 		    } else if (this_plot->plot_style == IMAGE) {
 			snprintf(buffer, BUFFERSIZE, "%g ", point->CRD_COLOR);
 			len = strappend(&line, &size, len, buffer);
+		    } else if (this_plot->plot_style == RGBIMAGE
+			   ||  this_plot->plot_style == RGBA_IMAGE) {
+			snprintf(buffer, BUFFERSIZE, "%4d %4d %4d %4d ", 
+			        (int)point->CRD_R, (int)point->CRD_G,
+			        (int)point->CRD_B, (int)point->CRD_A);
+			len = strappend(&line, &size, len, buffer);
 		    }
 		    snprintf(buffer, BUFFERSIZE, "%c",
 			    point->type == INRANGE
@@ -456,10 +476,10 @@ print_3dtable(int pcount)
 			    ? 'o' : 'u');
 		    strappend(&line, &size, len, buffer);
 		    print_line(line);
-		} /* for(point) */
-	    } /* for(icrvs) */
+		} /* for (point) */
+	    } /* for (icrvs) */
 	    print_line("");
-	} /* if(draw_surface) */
+	} /* if (draw_surface) */
 
 	if (draw_contour) {
 	    int number = 0;
@@ -469,7 +489,7 @@ print_3dtable(int pcount)
 		int count = c->num_pts;
 		struct coordinate *point = c->coords;
 
-		if (c->isNewLevel)
+		if (c->isNewLevel) {
 		    /* don't display count - contour split across chunks */
 		    /* put # in case user wants to use it for a plot */
 		    /* double blank line to allow plot ... index ... */
@@ -477,6 +497,7 @@ print_3dtable(int pcount)
 		    snprintf(line, size, "# Contour %d, label: %s",
 			    number++, c->label);
 		    print_line(line);
+		}
 
 		for (; --count >= 0; ++point) {
 		    line[0] = NUL;
@@ -505,7 +526,7 @@ print_3dtable(int pcount)
 static char *
 expand_newline(const char *in)
 {
-    char *tmpstr = (char *) gp_alloc(2 * strlen(in), "enl");
+    char *tmpstr = (char *) gp_alloc(2 * strlen(in) + 1, "enl");
     const char *s = in;
     char *t = tmpstr;
     do {
@@ -525,6 +546,7 @@ imploded(curve_points *this_plot)
 	/* These smooth styles called cp_implode() */
 	case SMOOTH_UNIQUE:
 	case SMOOTH_FREQUENCY:
+	case SMOOTH_FREQUENCY_NORMALISED:
 	case SMOOTH_CUMULATIVE:
 	case SMOOTH_CUMULATIVE_NORMALISED:
 	case SMOOTH_CSPLINES:
@@ -540,4 +562,50 @@ imploded(curve_points *this_plot)
 	    break;
     }
     return FALSE;
+}
+
+/*
+ * Called from plot2d.c (get_data) for "plot with table"
+ */
+TBOOLEAN
+tabulate_one_line(double v[MAXDATACOLS], struct value str[MAXDATACOLS], int ncols)
+{
+    int col;
+    FILE *outfile = (table_outfile) ? table_outfile : gpoutfile;
+
+    if (table_var == NULL) {
+	char sep = (table_sep && *table_sep) ? *table_sep : '\t';
+	for (col = 0; col < ncols; col++) {
+	    if (str[col].type == STRING)
+		fprintf(outfile, " %s", str[col].v.string_val);
+	    else
+		fprintf(outfile, " %g", v[col]);
+	    if (col < ncols-1)
+		fprintf(outfile, "%c", sep);
+	}
+	fprintf(outfile, "\n");
+    } else {
+	char buf[64]; /* buffer large enough to hold %g + 2 extra chars */
+	char sep = (table_sep && *table_sep) ? *table_sep : '\t';
+	size_t size = sizeof(buf);
+	char *line = (char *) gp_alloc(size, "");
+	size_t len = 0;
+
+	line[0] = NUL;
+	for (col = 0; col < ncols; col++) {
+	    if (str[col].type == STRING) {
+		len = strappend(&line, &size, 0, str[col].v.string_val);
+	    } else {
+		snprintf(buf, sizeof(buf), " %g", v[col]);
+		len = strappend(&line, &size, len, buf);
+	    }
+	    if (col < ncols-1) {
+		snprintf(buf, sizeof(buf), " %c", sep);
+		len = strappend(&line, &size, len, buf);
+	    }
+	}
+	append_to_datablock(&table_var->udv_value, line);
+    }
+ 
+    return TRUE;
 }

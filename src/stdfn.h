@@ -1,5 +1,5 @@
 /*
- * $Id: stdfn.h,v 1.49.2.1 2015/08/17 05:47:29 sfeam Exp $
+ * $Id: stdfn.h,v 1.55 2017/01/28 10:10:10 markisch Exp $
  */
 
 /* GNUPLOT - stdfn.h */
@@ -154,7 +154,7 @@ double strtod();
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #else
-# ifdef HAVE_LIBC_H /* NeXT uses libc instead of unistd */
+# ifdef HAVE_LIBC_H
 #  include <libc.h>
 # endif
 #endif /* HAVE_UNISTD_H */
@@ -342,7 +342,10 @@ int ms_snprintf(char *str, size_t size, const char * format, ...);
 #endif
 
 #ifndef GP_GETCWD
-# if defined(HAVE_GETCWD)
+# if defined(_WIN32)
+#  define GP_GETCWD(path,len) gp_getcwd (path, len)
+char * gp_getcwd(char *path, size_t len);
+# elif defined(HAVE_GETCWD)
 #   if defined(__EMX__)
 #     define GP_GETCWD(path,len) _getcwd2 (path, len)
 #   else
@@ -353,12 +356,12 @@ int ms_snprintf(char *str, size_t size, const char * format, ...);
 # endif
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 # include <windows.h>
 #endif
 
 /* sleep delay time, where delay is a double value */
-#if defined(HAVE_USLEEP)
+#if defined(HAVE_USLEEP) && !defined(_WIN32)
 #  define GP_SLEEP(delay) usleep((unsigned int) ((delay)*1e6))
 #  ifndef HAVE_SLEEP
 #    define HAVE_SLEEP
@@ -368,7 +371,7 @@ int ms_snprintf(char *str, size_t size, const char * format, ...);
 #  ifndef HAVE_SLEEP
 #    define HAVE_SLEEP
 #  endif
-#elif defined(WIN32)
+#elif defined(_WIN32)
 #  define GP_SLEEP(delay) win_sleep((DWORD) 1000*delay)
 #  ifndef HAVE_SLEEP
 #    define HAVE_SLEEP
@@ -397,7 +400,7 @@ void gp_exit_cleanup __PROTO((void));
 
 char * gp_basename __PROTO((char *path));
 
-#if !defined(HAVE_DIRENT_H) && defined(WIN32) && (!defined(__WATCOMC__))
+#ifdef _WIN32
 /*
 
     Declaration of POSIX directory browsing functions and types for Win32.
@@ -419,21 +422,27 @@ char * gp_basename __PROTO((char *path));
     But that said, if there are any problems please get in touch.
 
 */
-typedef struct DIR DIR;
+typedef struct GPDIR GPDIR;
 
-struct dirent
+struct gp_dirent
 {
     char *d_name;
 };
 
-DIR           *opendir __PROTO((const char *));
-int           closedir __PROTO((DIR *));
-struct dirent *readdir __PROTO((DIR *));
-void          rewinddir __PROTO((DIR *));
+GPDIR * gp_opendir(const char *);
+int gp_closedir(GPDIR *);
+struct gp_dirent *gp_readdir(GPDIR *);
+void gp_rewinddir(GPDIR *);
+#define opendir(p) gp_opendir(p)
+#define closedir(d) gp_closedir(d)
+#define readdir(d) gp_readdir(d)
+#define rewinddir(d) gp_rewinddir(d)
+#define dirent gp_dirent
+#define DIR GPDIR
 #elif defined(HAVE_DIRENT_H)
 # include <sys/types.h>
 # include <dirent.h>
-#endif /* !HAVE_DIRENT_H && WIN32 */
+#endif /* !HAVE_DIRENT_H && _WIN32 */
 
 
 /* Misc. defines */
@@ -453,40 +462,13 @@ void          rewinddir __PROTO((DIR *));
 # define DEBUG_WHERE do { fprintf(stderr,"%s:%d ",__FILE__,__LINE__); } while (0)
 # define FPRINTF(a) do { DEBUG_WHERE; fprintf a; } while (0)
 #else
-# define DEBUG_WHERE     /* nought */
-# define FPRINTF(a)      /* nought */
+# define DEBUG_WHERE     do { /* nought */ } while(0)
+# define FPRINTF(a)      do { /* nought */ } while(0)
 #endif /* DEBUG */
 
 #include "syscfg.h"
 
 #define INT_STR_LEN (3*sizeof(int))
-
-
-/* HBB 20010223: moved this whole block from syscfg.h to here. It
- * needs both "syscfg.h" and <float.h> to have been #include'd before
- * this, since it relies on stuff like DBL_MAX */
-
-/* There is a bug in the NEXT OS. This is a workaround. Lookout for
- * an OS correction to cancel the following dinosaur
- *
- * Hm, at least with my setup (compiler version 3.1, system 3.3p1),
- * DBL_MAX is defined correctly and HUGE and HUGE_VAL are both defined
- * as 1e999. I have no idea to which OS version the bugfix below
- * applies, at least wrt. HUGE, it is inconsistent with the current
- * version. Since we are using DBL_MAX anyway, most of this isn't
- * really needed anymore.
- */
-
-#if defined ( NEXT ) && NX_CURRENT_COMPILER_RELEASE<310
-# if defined ( DBL_MAX)
-#  undef DBL_MAX
-# endif
-# define DBL_MAX 1.7976931348623157e+308
-# undef HUGE
-# define HUGE    DBL_MAX
-# undef HUGE_VAL
-# define HUGE_VAL DBL_MAX
-#endif /* NEXT && NX_CURRENT_COMPILER_RELEASE<310 */
 
 /*
  * Note about VERYLARGE:  This is the upper bound double (or float, if PC)
@@ -592,6 +574,11 @@ void          rewinddir __PROTO((DIR *));
 	       (z) = (max);			\
        }					\
     } while (0)
+#endif
+
+#ifndef clip_to_01
+#define clip_to_01(val)	\
+    ((val) < 0 ? 0 : (val) > 1 ? 1 : (val))
 #endif
 
 /* both min/max and MIN/MAX are defined by some compilers.

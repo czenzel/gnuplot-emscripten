@@ -68,6 +68,7 @@ extern "C" {
 	#include "win/wtext.h"    // for kbhit, getchar
 	#include <io.h>           // for isatty
 #endif
+	#include "readline.h"	// for wrap_readline_signal_handler() to catch ^Z
 	#include <signal.h>
 }
 
@@ -105,6 +106,9 @@ struct QtGnuplotState {
     QLocalSocket socket;
     QByteArray   outBuffer;
     QDataStream  out;
+#ifdef _WIN32
+    DWORD        pid;
+#endif
 
     bool       enhancedSymbol;
     QString    enhancedFontName;
@@ -164,6 +168,7 @@ static int  qt_optionWidth    = 640;
 static int  qt_optionHeight   = 480;
 static int  qt_optionFontSize = 9;
 static double qt_optionDashLength = 1.0;
+static double qt_optionLineWidth = 1.0;
 
 /* Encapsulates all Qt options that have a constructor and destructor. */
 struct QtOption {
@@ -188,27 +193,38 @@ static bool qt_setPosition = false;
 static bool qt_setSize   = true;
 static int  qt_setWidth  = qt_optionWidth;
 static int  qt_setHeight = qt_optionHeight;
+static bool qt_is_3Dplot = false;
+
+static double qt_max_pos_base = 0.0;
+static double qt_max_neg_base = 0.0;
 
 /* ------------------------------------------------------
  * Helpers
  * ------------------------------------------------------*/
+// Adjust for the mismatch of real coords 0->ymax and pixel coords [0:ymax-1]
+#ifndef QT_YBASE
+#define QT_YBASE 1
+#endif
 
 // Convert gnuplot coordinates into floating point term coordinates
 QPointF qt_termCoordF(int x, int y)
 {
-	return QPointF(double(x)/qt_oversamplingF, double(int(term->ymax) - y)/qt_oversamplingF);
+	return QPointF(double(x)/qt_oversamplingF,
+			double(int(term->ymax) - QT_YBASE - y)/qt_oversamplingF);
 }
 
 // The same, but with coordinates clipped to the nearest pixel
 QPoint qt_termCoord(int x, int y)
 {
-	return QPoint(qRound(double(x)/qt_oversamplingF), qRound(double(term->ymax - y)/qt_oversamplingF));
+	return QPoint(qRound(double(x)/qt_oversamplingF),
+			qRound(double(term->ymax - QT_YBASE - y)/qt_oversamplingF));
 }
 
 // Inverse of the previous function
 QPoint qt_gnuplotCoord(int x, int y)
 {
-	return QPoint(x*qt_oversampling, int(term->ymax) - y*qt_oversampling);
+	return QPoint(x*qt_oversampling,
+			int(term->ymax) - QT_YBASE - y*qt_oversampling);
 }
 
 #ifndef GNUPLOT_QT
@@ -239,10 +255,15 @@ void execGnuplotQt()
 
 	qint64 pid;
 	qt->gnuplot_qtStarted = QProcess::startDetached(filename, QStringList(), QString(), &pid);
-	if (qt->gnuplot_qtStarted)
+	if (qt->gnuplot_qtStarted) {
 		qt->localServerName = "qtgnuplot" + QString::number(pid);
-	else
+#ifdef _WIN32
+		// save the terminal's PID for later use
+		qt->pid = pid;
+#endif
+	} else {
 		fprintf(stderr, "Could not start gnuplot_qt with path %s\n", filename.toUtf8().data());
+	}
 }
 
 /*-------------------------------------------------------
@@ -374,6 +395,19 @@ bool qt_processTermEvent(gp_event_t* event)
 		event->my = p.y();
 	}
 
+#ifdef _WIN32
+	if (event->type == GE_raise)
+	{
+# ifndef WGP_CONSOLE
+		SetForegroundWindow(textwin.hWndParent);
+# else
+		SetForegroundWindow(GetConsoleWindow());
+# endif
+		WinRaiseConsole();
+		return true;
+	}
+#endif
+
 	// Send the event to gnuplot core
 	do_event(event);
 	// Process pause_for_mouse
@@ -388,6 +422,11 @@ bool qt_processTermEvent(gp_event_t* event)
 			return true;
 	}
 	if ((event->type == GE_keypress) && (paused_for_mouse & PAUSE_KEYSTROKE) && (event->par1 > '\0'))
+	{
+		paused_for_mouse = 0;
+		return true;
+	}
+	if ((event->type == GE_reset))
 	{
 		paused_for_mouse = 0;
 		return true;
@@ -454,13 +493,16 @@ void qt_sendFont()
 			if (qt->socket.bytesAvailable() < (int)sizeof(gp_event_t)) {
 				fprintf(stderr, (waitcount++ % 10 > 0) ? "  ."
 					: "\nWarning: slow font initialization");
-#ifdef Q_OS_MAC
+#ifndef Q_OS_MAC
 				// OSX can be slow (>30 seconds?!) in determining font metrics
-				// Give it more time rather than failing after 1 second 
-				// Possibly this is only relevant to Qt5
-				GP_SLEEP(0.5);
-				continue;
+				// Always give it more time rather than failing after 1 second
+				// Everyone else can use --slow on the command line
+				if (slow_font_startup)
 #endif
+				{
+				    GP_SLEEP(0.5);
+				    continue;
+				}
 				return;
 			}
 			while (qt->socket.bytesAvailable() >= (int)sizeof(gp_event_t))
@@ -513,6 +555,10 @@ void qt_graphics()
 	// Initialize window
 	qt->out << GESetCurrentWindow << qt_optionWindowId;
 	qt->out << GEInitWindow;
+#ifdef _WIN32
+	// Let the terminal window know our PID
+	qt->out << GEPID << quint32(GetCurrentProcessId());
+#endif
 	qt->out << GEActivate;
 	qt->out << GETitle << qt_option->Title;
 	qt->out << GESetCtrl << qt_optionCtrl;
@@ -524,6 +570,8 @@ void qt_graphics()
 	qt_sendFont();
 	term->v_tic = (unsigned int) (term->v_char/2.5);
 	term->h_tic = (unsigned int) (term->v_char/2.5);
+	// Tell user what scale factor relates term coordinates to pixels
+	term->tscale = qt_oversamplingF;
 
 	if (qt_setPosition)
 	{
@@ -536,7 +584,13 @@ void qt_graphics()
 void qt_text()
 {
 	if (qt_optionRaise)
+	{
+#ifdef _WIN32
+		// The qt graph window is in another process and we must explicitly allow it to "raise".
+		AllowSetForegroundWindow(qt->pid);
+#endif
 		qt->out << GERaise;
+	}
 	qt->out << GEDone;
 	qt_flushOutBuffer();
 }
@@ -546,7 +600,7 @@ void qt_text_wrapper()
 	if (!qt)
 		return;
 
-	// Remember scale to update the status bar while the plot is inactive
+	// Remember scale so that we can update the status bar while the plot is inactive
 	qt->out << GEScale;
 
 	const int axis_order[4] = {FIRST_X_AXIS, FIRST_Y_AXIS, SECOND_X_AXIS, SECOND_Y_AXIS};
@@ -566,6 +620,9 @@ void qt_text_wrapper()
 		qt->out << lower/qt_oversamplingF << scale/qt_oversamplingF;
 		qt->out << (axis_array[axis_order[i]].log ? axis_array[axis_order[i]].log_base : 0.);
 	}
+	// Flag whether this was a 3D plot (not mousable in 'persist' mode)
+	qt->out << qt_is_3Dplot;
+	qt_is_3Dplot = false;
 
 	qt_text();
 }
@@ -610,6 +667,12 @@ void qt_enhanced_open(char* fontname, double fontsize, double base, TBOOLEAN wid
 	qt->enhancedWidthFlag = widthflag;
 	qt->enhancedShowFlag  = showflag;
 	qt->enhancedOverprint = overprint;
+
+	// Baseline correction.  Surely Qt itself provides this somehow?
+	if (qt_max_pos_base < base)
+	    qt_max_pos_base = base;
+	if (qt_max_neg_base > base)
+	    qt_max_neg_base = base;
 
 	// strip Bold or Italic property out of font name
 	QString tempname = fontname;
@@ -659,6 +722,9 @@ void qt_put_text(unsigned int x, unsigned int y, const char* string)
 	enhanced_fontscale = 1.0;
 	strncpy(enhanced_escape_format, "%c", sizeof(enhanced_escape_format));
 
+	// Baseline correction
+	qt_max_pos_base = qt_max_neg_base = 0.0;
+
 	// Set the recursion going. We say to keep going until a closing brace, but
 	// we don't really expect to find one.  If the return value is not the nul-
 	// terminator of the string, that can only mean that we did find an unmatched
@@ -674,14 +740,15 @@ void qt_put_text(unsigned int x, unsigned int y, const char* string)
 		// else carry on and process the rest of the string
 	}
 
+	// Baseline correction
+	y += qt_max_pos_base * 5;
+	y += qt_max_neg_base * 5;
+
 	qt->out << GEEnhancedFinish << qt_termCoord(x, y);
 }
 
 void qt_linetype(int lt)
 {
-	if (lt <= LT_NODRAW)
-		lt = LT_NODRAW; // background color
-
 	/* Version 5: dash pattern will be set later by term->dashtype */
 	if (lt == LT_AXIS)
 		qt->out << GEPenStyle << Qt::DotLine;
@@ -690,10 +757,9 @@ void qt_linetype(int lt)
 	else 
 		qt->out << GEPenStyle << Qt::SolidLine;
 
-	if ((lt-1) == LT_BACKGROUND) {
-		/* FIXME: Add parameter to this API to set the background color from the gnuplot end */
+	if (lt == LT_BACKGROUND)
 		qt->out << GEBackgroundColor;
-	} else
+	else if (lt > LT_NODRAW)
 		qt->out << GEPenColor << qt_colorList[lt % 9 + 3];
 }
 
@@ -797,7 +863,7 @@ void qt_pointsize(double ptsize)
 
 void qt_linewidth(double lw)
 {
-	qt->out << GELineWidth << lw;
+	qt->out << GELineWidth << lw * qt_optionLineWidth;
 }
 
 int qt_text_angle(int angle)
@@ -966,8 +1032,16 @@ int qt_waitforinput(int options)
 		}
 
 		// Wait for input
-		if (select(socket_fd+1, &read_fds, NULL, NULL, timeout) < 0)
-		{
+		int n_changed_fds = select(socket_fd+1, &read_fds,
+						NULL,	// not watching for write-only
+						NULL,	// not watching for exceptions
+						timeout );
+
+		if (n_changed_fds < 0) {
+			if (errno == EINTR) {
+				wrap_readline_signal_handler();
+				continue;
+			}
 			// Display the error message except when Ctrl + C is pressed
 			if (errno != 4)
 				fprintf(stderr, "Qt terminal communication error: select() error %i %s\n", errno, strerror(errno));
@@ -1023,8 +1097,8 @@ int qt_waitforinput(int options)
 
 	if (options == TERM_ONLY_CHECK_MOUSING)
 		return '\0';
-	else
-		return getchar();
+
+	return getchar();
 
 #else // Windows console and wgnuplot
 #ifdef WGP_CONSOLE
@@ -1113,6 +1187,7 @@ int qt_waitforinput(int options)
 			// are received, only transmit the last one.
 			gp_event_t tempEvent;
 			tempEvent.type = -1;
+			int size = qt->socket.bytesAvailable();
 			while (qt->socket.bytesAvailable() >= (int)sizeof(gp_event_t)) {
 				struct gp_event_t event;
 				qt->socket.read((char*) &event, sizeof(gp_event_t));
@@ -1131,6 +1206,10 @@ int qt_waitforinput(int options)
 					}
 				}
 			}
+			// If the native pipe handle signalled new data, but the QtLocalSocket 
+			// object has no data available, release the CPU for a little while.
+			if (size == 0)
+				Sleep(100);
 			// Replay move event
 			if (tempEvent.type == GE_motion)
 				qt_processTermEvent(&tempEvent);
@@ -1224,6 +1303,7 @@ enum QT_id {
 	QT_DASH,
 	QT_DASHLENGTH,
 	QT_SOLID,
+	QT_LINEWIDTH,
 	QT_OTHER
 };
 
@@ -1242,10 +1322,12 @@ static struct gen_table qt_opts[] = {
 	{"noct$rlq",    QT_NOCTRL},
 	{"ti$tle",      QT_TITLE},
 	{"cl$ose",      QT_CLOSE},
-	{"dash$ed",	QT_DASH},
-	{"dashl$ength",	QT_DASHLENGTH},
-	{"dl",		QT_DASHLENGTH},
-	{"solid",	QT_SOLID},
+	{"dash$ed",     QT_DASH},
+	{"dashl$ength", QT_DASHLENGTH},
+	{"dl",          QT_DASHLENGTH},
+	{"solid",       QT_SOLID},
+	{"line$width",  QT_LINEWIDTH},
+	{"lw",          QT_LINEWIDTH},
 	{NULL,          QT_OTHER}
 };
 
@@ -1268,6 +1350,7 @@ void qt_options()
 	bool set_widget = false;
 	bool set_dash = false;
 	bool set_dashlength = false;
+	bool set_linewidth = false;
 	int previous_WindowId = qt_optionWindowId;
 
 #ifndef WIN32
@@ -1385,6 +1468,10 @@ void qt_options()
 			// qt_optionDash = false;
 			c_token++;
 			break;
+		case QT_LINEWIDTH:
+			SETCHECKDUP(set_linewidth);
+			qt_optionLineWidth = real_expression();
+			break;
 		case QT_OTHER:
 		default:
 			qt_optionWindowId = int_expression();
@@ -1435,6 +1522,7 @@ void qt_options()
 
 	if (set_enhanced) termOptions += qt_optionEnhanced ? " enhanced" : " noenhanced";
 	                  termOptions += " font \"" + fontSettings + '"';
+	if (set_linewidth) termOptions += " linewidth " + QString::number(qt_optionLineWidth);
 	if (set_dashlength) termOptions += " dashlength " + QString::number(qt_optionDashLength);
 	if (set_widget)   termOptions += " widget \"" + qt_option->Widget + '"';
 	if (set_persist)  termOptions += qt_optionPersist ? " persist" : " nopersist";
@@ -1474,6 +1562,8 @@ void qt_layer( t_termlayer syncpoint )
 		qt->out << GELayer << QTLAYER_END_KEYSAMPLE; break;
 	case TERM_LAYER_BEFORE_ZOOM:
 		qt->out << GELayer << QTLAYER_BEFORE_ZOOM; break;
+	case TERM_LAYER_3DPLOT:
+		qt_is_3Dplot = true; break;
     	default:
 		break;
     }

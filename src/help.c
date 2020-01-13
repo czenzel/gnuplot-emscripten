@@ -1,5 +1,5 @@
 #ifndef lint
-static char *RCSid() { return RCSid("$Id: help.c,v 1.29.2.1 2015/09/11 19:49:26 sfeam Exp $"); }
+static char *RCSid() { return RCSid("$Id: help.c,v 1.31 2015/09/11 19:48:02 sfeam Exp $"); }
 #endif
 
 /* GNUPLOT - help.c */
@@ -146,7 +146,7 @@ static KEY empty_key = {NULL, 0, NULL, 0};
 
 static int LoadHelp __PROTO((char *path));
 static void sortkeys __PROTO((void));
-int keycomp __PROTO((SORTFUNC_ARGS a, SORTFUNC_ARGS b));
+static int keycomp __PROTO((SORTFUNC_ARGS a, SORTFUNC_ARGS b));
 static LINEBUF *storeline __PROTO((char *text));
 static LINKEY *storekey __PROTO((char *key));
 static KEY *FindHelp __PROTO((char *keyword));
@@ -351,8 +351,7 @@ sortkeys()
 /* HBB 20010720: changed to make this match the prototype qsort()
  * really expects. Casting function pointers, as we did before, is
  * illegal! */
-/* HBB 20010720: removed 'static' to avoid HP-sUX gcc bug */
-int
+static int
 keycomp(SORTFUNC_ARGS arg1, SORTFUNC_ARGS arg2)
 {
     const KEY *a = arg1;
@@ -458,7 +457,7 @@ Ambiguous(KEY *key, size_t len)
 	     * But is it different enough from the previous one
 	     * to bother printing it as a separate choice?
 	     */
-	    sublen = strcspn(prev + len, " ");
+	    sublen = strcspn(key->key + len, " ");
 	    if (strncmp(key->key, prev, len + sublen) != 0) {
 		/* yup, this is different up to the next space */
 		if (!status) {

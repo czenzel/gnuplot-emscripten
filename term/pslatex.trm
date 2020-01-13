@@ -1,5 +1,5 @@
 /* Hello, Emacs, this is -*-C-*-
- * $Id: pslatex.trm,v 1.90.2.5 2016/09/01 19:01:25 sfeam Exp $
+ * $Id: pslatex.trm,v 1.98 2016/09/08 03:17:18 sfeam Exp $
  */
 
 /* GNUPLOT - pslatex.trm */
@@ -129,12 +129,14 @@ static int epslatex_text_layer = 0;
 /* Support for optimization of set_color */
 static t_colorspec tex_previous_colorspec = {-1, 0, 0.0};  /* Initialize to invalid type */
 static char tex_current_color[64];
+static char tex_rgb_colordef[64];
 static TBOOLEAN tex_color_synced = FALSE;
 
 /* support for cairolatex */
 #ifdef HAVE_CAIROPDF
 #define ISCAIROTERMINAL ((strcmp(term->name, "cairolatex") == 0))
-TERM_PUBLIC void cairotrm_set_color __PROTO ((t_colorspec *colorspec));
+TERM_PUBLIC void cairotrm_set_color(t_colorspec *colorspec);
+TERM_PUBLIC void cairotrm_linetype(int lt);
 #else
 #define ISCAIROTERMINAL (FALSE)
 #endif
@@ -145,6 +147,7 @@ static TBOOLEAN PSLATEX_saved = FALSE;
 static int PSLATEX_xbox, PSLATEX_ybox;
 static double PSLATEX_xmargin = 1.0;
 static double PSLATEX_ymargin = 1.0;
+static double PSLATEX_opacity = 1.0;
 
 /* Common functions for epslatex and ps(la)tex */
 
@@ -403,6 +406,7 @@ PSTEX_text()
 /* Functions for epslatex */
 
 /* the common init function for the epslatex driver */
+/* used by pslatex epslatex cairolatex */
 TERM_PUBLIC void
 EPSLATEX_common_init()
 {
@@ -470,6 +474,10 @@ EPSLATEX_common_init()
         case S_ENC_KOI8_U:
             inputenc = "koi8-u";
             break;
+	case S_ENC_UTF8:
+	    /* utf8x (not utf8) is needed to pick up degree and micro signs */
+	    inputenc = "utf8x";
+	    break;
         case S_ENC_INVALID:
             int_error(NO_CARET, "invalid input encoding used");
             break;
@@ -543,6 +551,9 @@ EPSLATEX_common_init()
 \\usepackage{graphicx}\n\
 \\usepackage{color}\n", gpoutfile);
 
+	    if (ISCAIROTERMINAL)
+		fprintf(gpoutfile, "\\usepackage{transparent}\n");
+
             if (inputenc)
                 fprintf(gpoutfile, "\\usepackage[%s]{inputenc}\n", inputenc);
 
@@ -596,7 +607,7 @@ EPSLATEX_common_init()
 
         fputs("\\begingroup\n", gpoutfile);
         
-        if (inputenc)
+        if (inputenc && encoding != S_ENC_UTF8)
             fprintf(gpoutfile, "\
   %% Encoding inside the plot.  In the header of your document, this encoding\n\
   %% should to defined, e.g., by using\n\
@@ -750,6 +761,7 @@ EPSLATEX_put_text(unsigned int x, unsigned int y, const char *str)
     if (gpoutfile) {
 	if (!tex_color_synced) {
 	    fputs(tex_current_color, gpoutfile);
+	    fputs("%%\n", gpoutfile);
 	    tex_color_synced = TRUE;
 	}
 	if (PSLATEX_inbox) {
@@ -868,12 +880,7 @@ EPSLATEX_set_color(t_colorspec *colorspec)
 	    return;
 	else
 	    memcpy(&tex_previous_colorspec, colorspec, sizeof(t_colorspec));
-#if (0)	/* Not correct for version 5 */
-        if (colorspec->type == TC_LT && !ps_params->color)
-            PS_linetype(colorspec->lt);
-        else
-#endif
-            PS_set_color(colorspec);
+	PS_set_color(colorspec);
     }
 
     /* Many [most? all?] of the set_color commands only affect the *.eps     */
@@ -887,7 +894,8 @@ EPSLATEX_set_color(t_colorspec *colorspec)
         double r = (double)((colorspec->lt >> 16 ) & 255) / 255.;
         double g = (double)((colorspec->lt >> 8 ) & 255) / 255.;
         double b = (double)(colorspec->lt & 255) / 255.;
-	sprintf(tex_current_color, "      \\colorrgb{%3.2f,%3.2f,%3.2f}%%\n",r,g,b);
+	sprintf(tex_current_color, "      \\colorrgb{%3.2f,%3.2f,%3.2f}",r,g,b);
+	sprintf(tex_rgb_colordef, "\\definecolor{tbcol}{rgb}{%3.2f,%3.2f,%3.2f}",r,g,b);
     }
 
     if (colorspec->type == TC_LT) {
@@ -897,8 +905,10 @@ EPSLATEX_set_color(t_colorspec *colorspec)
         else
             linetype = (linetype % 9) + 3;
 
-	sprintf(tex_current_color, "      \\csname LT%c\\endcsname%%\n",
+	sprintf(tex_current_color, "      \\csname LT%c\\endcsname",
                 "wba012345678"[linetype]);
+	/* FIXME */
+	sprintf(tex_rgb_colordef, "\\definecolor{tbcol}{rgb}{1,1,1}");
     }
 
     if (colorspec->type != TC_FRAC)
@@ -909,15 +919,16 @@ EPSLATEX_set_color(t_colorspec *colorspec)
 
     if (ps_params->blacktext) {
 	if (gray <= 0)
-	    sprintf(tex_current_color, "      \\color{black}%%\n");
+	    sprintf(tex_current_color, "      \\color{black}");
 	else if (gray >= 1)
-	    sprintf(tex_current_color, "      \\color{white}%%\n");
+	    sprintf(tex_current_color, "      \\color{white}");
         else
-	    sprintf(tex_current_color, "      \\colorgray{%s}%%\n",save_space(gray));
+	    sprintf(tex_current_color, "      \\colorgray{%s}",save_space(gray));
     } else {
 	rgb_color color;
 	rgb1_from_gray( colorspec->value, &color );
-	sprintf(tex_current_color, "      \\colorrgb{%3.2f,%3.2f,%3.2f}%%\n",color.r,color.g,color.b);
+	sprintf(tex_current_color, "      \\colorrgb{%3.2f,%3.2f,%3.2f}",color.r,color.g,color.b);
+	sprintf(tex_rgb_colordef, "\\definecolor{tbcol}{rgb}{%3.2f,%3.2f,%3.2f}",color.r,color.g,color.b);
     }
 }
 
@@ -926,7 +937,13 @@ EPSLATEX_linetype(int linetype)
 {
     t_colorspec tempcol = {TC_LT, 0, 0.0};
     tempcol.lt = linetype;
-    PS_linetype(linetype);
+
+#ifdef HAVE_CAIROPDF
+    if (ISCAIROTERMINAL)
+	cairotrm_linetype(linetype);
+    else
+#endif
+	PS_linetype(linetype);
 
     /* This leads to redundant *.eps output */
     EPSLATEX_set_color(&tempcol);
@@ -944,12 +961,14 @@ EPSLATEX_layer(t_termlayer syncpoint)
     switch (syncpoint) {
 
     case TERM_LAYER_BEFORE_PLOT:
-	fprintf(gppsfile, "%% Begin plot #%d\n", ++plotno);
+	if (!ISCAIROTERMINAL)
+	    fprintf(gppsfile, "%% Begin plot #%d\n", ++plotno);
 	break;
     
     case TERM_LAYER_AFTER_PLOT:
 	PS_linetype(LT_UNDEFINED);	/* Forces a stroke and resets linetype */
-	fprintf(gppsfile, "%% End plot #%d\n", plotno);
+	if (!ISCAIROTERMINAL)
+	    fprintf(gppsfile, "%% End plot #%d\n", plotno);
 	break;
 
     case TERM_LAYER_RESET:        /* Start of plot; reset flag */
@@ -984,11 +1003,13 @@ EPSLATEX_layer(t_termlayer syncpoint)
 	break;
 
     case TERM_LAYER_BEGIN_PM3D_MAP:
+	if (!ISCAIROTERMINAL)
 	if (gppsfile && (gppsfile != gpoutfile))
 	    fprintf(gppsfile, "%%pm3d_map_begin\n");
 	break;
     
     case TERM_LAYER_END_PM3D_MAP:
+	if (!ISCAIROTERMINAL)
 	if (gppsfile && (gppsfile != gpoutfile))
 	    fprintf(gppsfile, "%%pm3d_map_end\n");
 	break;
@@ -1015,41 +1036,46 @@ EPSLATEX_boxed_text(unsigned int x, unsigned int y, int option)
 	PSLATEX_inbox = FALSE;
 	break;
     case TEXTBOX_OUTLINE:
-	fprintf(gpoutfile, "\t\\settowidth{\\gptboxwidth}{\\usebox{\\gptboxtext}}\n");
-	fprintf(gpoutfile, "\t\\advance\\gptboxwidth by 2\\fboxsep\n");
+	fputs("\t\\settowidth{\\gptboxwidth}{\\usebox{\\gptboxtext}}\n", gpoutfile);
+	fputs("\t\\advance\\gptboxwidth by 2\\fboxsep\n", gpoutfile);
 	fprintf(gpoutfile, "\t\\put(%d,%d)", PSLATEX_xbox, PSLATEX_ybox);
 	switch (ps_justify) {
 	case LEFT:
-	    fprintf(gpoutfile, "{\\framebox[\\gptboxwidth][c]{\\usebox{\\gptboxtext}}}\n");
+	    fputs("{\\makebox(0,0)[l]", gpoutfile);
+	    fputs("{\\framebox[\\gptboxwidth]{\\usebox{\\gptboxtext}}}}\n", gpoutfile);
 	    break;
 	case CENTRE:
-	    fprintf(gpoutfile, "{\\makebox[0.5\\width][r]");
-	    fprintf(gpoutfile, "{\\framebox[\\gptboxwidth][c]{\\usebox{\\gptboxtext}}}}\n");
+	    fputs("{\\makebox(0,0)", gpoutfile);
+	    fputs("{\\framebox[\\gptboxwidth][c]{\\usebox{\\gptboxtext}}}}\n", gpoutfile);
 	    break;
 	case RIGHT:
-	    fprintf(gpoutfile, "{\\makebox[-\\width][c]");
-	    fprintf(gpoutfile, "{\\framebox[\\gptboxwidth][c]{\\usebox{\\gptboxtext}}}}\n");
+	    fputs("{\\makebox(0,0)[r]", gpoutfile);
+	    fputs("{\\framebox[\\gptboxwidth][r]{\\usebox{\\gptboxtext}}}}\n", gpoutfile);
 	    break;
 	}
 	PSLATEX_inbox = FALSE;
 	break;
     case TEXTBOX_BACKGROUNDFILL:
-	/* FIXME: should use background fill rather than white */
-	/* FIXME: I have zero idea why CENTER requires r while RIGHT requires c */
+	if (!tex_color_synced) {
+	    /* FIXME: sync tex_current_color also? */
+	    fprintf(gpoutfile, "        %s\n", tex_rgb_colordef);
+	    tex_color_synced = TRUE;
+	}
 	fprintf(gpoutfile, "\t\\put(%d,%d)", PSLATEX_xbox, PSLATEX_ybox);
 	switch (ps_justify) {
 	case LEFT:
-	    fprintf(gpoutfile, "{\\colorbox{white}{\\usebox{\\gptboxtext}}}\n");
+	    fputs("{\\makebox(0,0)[l]{", gpoutfile);
 	    break;
 	case CENTRE:
-	    fprintf(gpoutfile, "{\\makebox[0.5\\width][r]");
-	    fprintf(gpoutfile, "{\\colorbox{white}{\\usebox{\\gptboxtext}}}}\n");
+	    fputs("{\\makebox(0,0){", gpoutfile);
 	    break;
 	case RIGHT:
-	    fprintf(gpoutfile, "{\\makebox[-\\width][c]");
-	    fprintf(gpoutfile, "{\\colorbox{white}{\\usebox{\\gptboxtext}}}}\n");
+	    fputs("{\\makebox(0,0)[r]{", gpoutfile);
 	    break;
 	}
+	if (PSLATEX_opacity < 1.0)
+	    fprintf(gpoutfile, "\\transparent{%.2f}", PSLATEX_opacity);
+	fputs("\\colorbox{tbcol}{\\usebox{\\gptboxtext}}}}\n", gpoutfile);
 	break;
     case TEXTBOX_MARGINS:
 	PSLATEX_xmargin = (double)x / 100.;

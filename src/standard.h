@@ -1,5 +1,5 @@
 /*
- * $Id: standard.h,v 1.12 2008/03/30 03:03:48 sfeam Exp $
+ * $Id: standard.h,v 1.11 2006/07/14 00:30:41 sfeam Exp $
  */
 
 /* GNUPLOT - standard.h */

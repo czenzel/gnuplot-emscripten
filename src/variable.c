@@ -212,9 +212,7 @@ struct path_table {
     const char *dir;
 };
 
-/* Yet, no special font paths for these operating systems:
- * MSDOS, NeXT, ultrix, VMS, _IBMR2, alliant
- *
+/*
  * Environmental variables are written as $(name).
  * Commands are written as $`command`.
  */

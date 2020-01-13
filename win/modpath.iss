@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 //
 // Inno Setup Ver:	5.4.2
-// Script Version:	1.4.1
+// Script Version:	1.4.2
 // Author:			Jared Breland <jbreland@legroom.net>
 // Homepage:		http://www.legroom.net/software
 // License:			GNU Lesser General Public License (LGPL), version 3
@@ -97,7 +97,9 @@ begin
 				if i = 1 then begin
 					newpath := pathArr[i-1];
 				end else begin
-					newpath := newpath + ';' + pathArr[i-1];
+					// BM: skip empty entries
+					if Length(pathArr[i-1]) > 0 then
+						newpath := newpath + ';' + pathArr[i-1];
 				end;
 			end;
 
@@ -145,7 +147,7 @@ begin
 end;
 
 // Split a string into an array using passed delimeter
-procedure Explode(var Dest: TArrayOfString; Text: String; Separator: String);
+procedure MPExplode(var Dest: TArrayOfString; Text: String; Separator: String);
 var
 	i: Integer;
 begin
@@ -195,7 +197,7 @@ begin
 		// check each task; if matches modpath taskname, trigger patch removal
 		if regstring <> '' then begin
 			taskname := ModPathName;
-			Explode(aSelectedTasks, regstring, ',');
+			MPExplode(aSelectedTasks, regstring, ',');
 			if GetArrayLength(aSelectedTasks) > 0 then begin
 				for i := 0 to GetArrayLength(aSelectedTasks)-1 do begin
 					if comparetext(aSelectedTasks[i], taskname) = 0 then

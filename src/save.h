@@ -1,5 +1,5 @@
 /*
- * $Id: save.h,v 1.18.2.1 2014/11/08 04:52:25 sfeam Exp $
+ * $Id: save.h,v 1.29 2016/07/23 03:34:41 sfeam Exp $
  */
 
 /* GNUPLOT - save.h */
@@ -47,6 +47,7 @@
 /* Type definitions */
 
 /* Variables of save.c needed by other modules: */
+extern const char *coord_msg[];
 
 /* Prototypes of functions exported by save.c */
 void save_functions __PROTO((FILE *fp));
@@ -54,8 +55,10 @@ void save_variables __PROTO((FILE *fp));
 void save_set __PROTO((FILE *fp));
 void save_term __PROTO((FILE *fp));
 void save_all __PROTO((FILE *fp));
-void save_position __PROTO((FILE *, struct position *, TBOOLEAN));
-void save_range __PROTO((FILE *, AXIS_INDEX));
+void save_position __PROTO((FILE *, struct position *, int, TBOOLEAN));
+void save_prange __PROTO((FILE *, struct axis *));
+void save_link __PROTO((FILE *, struct axis *));
+void save_nonlinear __PROTO((FILE *, struct axis *));
 void save_textcolor __PROTO((FILE *, const struct t_colorspec *));
 void save_pm3dcolor __PROTO((FILE *, const struct t_colorspec *));
 void save_fillstyle __PROTO((FILE *, const struct fill_style_type *));
@@ -64,10 +67,16 @@ void save_histogram_opts __PROTO((FILE *fp));
 #ifdef EAM_OBJECTS
 void save_object __PROTO((FILE *, int));
 #endif
+#ifdef EAM_BOXED_TEXT
+void save_style_textbox __PROTO((FILE *));
+#endif
 void save_style_parallel __PROTO((FILE *));
 void save_data_func_style __PROTO((FILE *, const char *, enum PLOT_STYLE));
 void save_linetype __PROTO((FILE *, lp_style_type *, TBOOLEAN));
 void save_dashtype __PROTO((FILE *, int, const t_dashtype *));
-void save_num_or_time_input __PROTO((FILE *, double x, AXIS_INDEX axis));
+void save_num_or_time_input __PROTO((FILE *, double x, struct axis *));
+void save_axis_format __PROTO((FILE *fp, AXIS_INDEX axis));
+void save_bars __PROTO((FILE *));
+void save_array_content __PROTO((FILE *, struct value *));
 
 #endif /* GNUPLOT_SAVE_H */

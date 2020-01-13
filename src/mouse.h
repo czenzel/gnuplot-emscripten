@@ -1,5 +1,5 @@
 /*
- * $Id: mouse.h,v 1.26 2014/07/23 05:45:49 sfeam Exp $
+ * $Id: mouse.h,v 1.25 2014/04/28 21:16:13 sfeam Exp $
  */
 
 /* GNUPLOT - mouse.h */

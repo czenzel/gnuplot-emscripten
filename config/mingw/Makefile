@@ -1,9 +1,11 @@
 # Hello, emacs: this is a -*- Makefile -*-
-# $Id: Makefile,v 1.48.2.4 2016/03/22 16:49:48 markisch Exp $
+# $Id: Makefile,v 1.72.2.3 2017/07/30 08:24:24 markisch Exp $
 #
 # GNUPLOT Makefile for MinGW/MSYS or MinGW-w64/MSYS2 on Windows 
-# This assumes a typical installation of the MinGW toolkit, the free
-# GNU gcc. 
+#
+# Note: Currently MinGW cannot be used to compile gnuplot unless
+#       libraries / headers are updated.
+#
 # See http://www.mingw.org or http://msys2.github.io/ for more details.
 
 # To compile gnuplot for Windows:
@@ -49,6 +51,9 @@ RELEASE=1
 # On 64bit machines: (no access to ProgramFiles(x86) variable!)
 PROGRAMFILES32=/c/Program\ Files\ \(x86\)
 
+# Define if you would like a UNICODE build
+UNICODE=1
+
 # GIF, PNG, JPEG device drivers
 # Requires gd library. There are two possibilities how to configure these
 # drivers for use in gnuplot, depending on the gd version. See README.1ST for
@@ -67,6 +72,7 @@ PROGRAMFILES32=/c/Program\ Files\ \(x86\)
 #JPEG=1
 #FREETYPE=1
 #GDAUTOCONFIGLIBS=1
+#GDPKGCONFIG=1
 #BGD=1
 
 # PDF device driver
@@ -103,13 +109,17 @@ MOUSE=1
 #CAIROLIBS=1
 
 # Build qt terminal?
-#QT = 1
+#QT=1
 # specify QT installation directory
 #QT_DIR = /c/Qt/5.2.1/mingw48_32
 ifndef MINGW64
 QT_DIR = /d/Source/Qt-5.2.1-mingw/5.2.1/mingw48_32
 else
+ifdef M32
+QT_DIR = /mingw32
+else
 QT_DIR = /mingw64
+endif
 endif
 
 # Uncomment the following line to select the lua/tikz terminal
@@ -119,7 +129,7 @@ endif
 # Requires libcaca version 0.99.beta15 or newer. A post-beta18
 # svn version is recommended since it contains an improved
 # win32 backend.
-CACA=1
+#CACA=1
 
 # Uncomment if you have libiconv
 ICONV=1
@@ -127,6 +137,10 @@ ICONV=1
 # Uncomment if you have libcerf
 # http://sourceforge.net/projects/libcerf/
 CERF=1
+
+# Uncomment if console mode gnuplot should use GNU readline
+# (not recommended)
+#GNUREADLINE=1
 
 # Below you can adapt paths according to your software setup:
 
@@ -149,17 +163,18 @@ GNUPLOT_TEX_DIR = share/texmf/tex
 # gnuplot will look for gnuplotrc here:
 GNUPLOT_SHARE_DIR = share
 
-
 # Destination directory, used in 'make install':
 #DESTDIR = /local/opt/gnuplot-4.5
 DESTDIR = "$(PROGRAMFILES)/gnuplot"
 
 # Do you want some special optimization / flags?
 #CFLAGS +=
+CWFLAGS += -Wno-unused-function
 ifdef CLANG
 CFLAGS += -fcolor-diagnostics -fansi-escape-codes
-CFLAGS += -Wno-error=incompatible-ms-struct -Wno-ignored-attributes
-CFLAGS +=  -isystem c:/msys64/mingw64/include -pedantic
+CWFLAGS += -Wno-incompatible-ms-struct -Wno-ignored-attributes
+CWFLAGS += -Wno-infinite-recursion
+CXXFLAGS += -std=c++11
 endif
 ifdef MINGW64
 # This does not seem to work even if GCC_COLORS is set.
@@ -186,6 +201,8 @@ GNUSORT = /bin/sort
 
 # Inno Setup Compiler
 # get it from: http://www.jrsoftware.org/isdl.php
+# Use unicode version of Inno Setup Compiler but not Standard version
+# because the setup file of gnuplot installer is now encoded utf-8 with BOM.
 ISCC = $(PROGRAMFILES32)/Inno\ Setup\ 5/iscc
 
 # Directory that might contain extra files to be shipped with the installer.
@@ -211,19 +228,11 @@ endif
 
 # Choose target to compile:
 # 1. wgnuplot.exe: The usual Windows GUI for input commands.
-# 2. wgnuplot_pipes.exe: The usual Windows GUI with support of pipes, so
-#    that e.g.  plot '<awk -f preprocess.awk my.dat')  or  x=system('ls -1')
-#    can work. Drawback: wgnuplot_pipes.exe keeps attached to a console (DOS)
-#    window it was launched from, or it opens a new one.
+# 2. wgnuplot_pipes.exe: Like wgnuplot, but with an additional console
+#    window, so you can see the output of commands like
+#      plot '<awk -f preprocess.awk my.dat')  or  x=system('ls -1')
 # 3. gnuplot.exe: Console mode instead of GUI for the text input.
 #
-
-# PIPES: define if you would prefer support of pipes undef Windows (e.g.
-# plot '<awk -f preprocess.awk my.dat'). Drawback: wgnuplot_pipes.exe keeps
-# attached to a console=DOS window it was launched from, or it opens a new one.
-
-# CONSOLE: define if you would prefer the console (non-GUI) version of the
-# text command window.
 
 ifndef TARGET
 TARGET=wgnuplot.exe
@@ -235,7 +244,11 @@ endif
 ifeq ($(TARGET),wgnuplot.exe)
 	MENUFILE=wgnuplot.mnu
 	O=o
+ifndef MINGW64
 	CFLAGSEXTRA=-DUSE_FAKEPIPES
+else
+	CFLAGSEXTRA=-DPIPES
+endif
 endif
 ifeq ($(TARGET),wgnuplot_pipes.exe)
 	MENUFILE=wgnuplot.mnu
@@ -293,6 +306,12 @@ else
   LDFLAGS += -s
 endif
 
+ifdef UNICODE
+  CFLAGS += -DUNICODE -D_UNICODE
+endif
+
+CFLAGS += $(CWFLAGS)
+
 LDFLAGS2 = -mwindows -Wl,--enable-auto-import
 ifdef PIPES
   OPTS += -DPIPES
@@ -300,7 +319,7 @@ ifdef PIPES
 endif
 
 ifdef CONSOLE
-  OPTS += -DWGP_CONSOLE -DCONSOLE_SWITCH_CP
+  OPTS += -DWGP_CONSOLE
   LDFLAGS2 = -mconsole
 endif
 
@@ -358,18 +377,25 @@ ifdef PNG
   CFLAGS += -DHAVE_LIBPNG
   ifndef BGD
   ifndef GDAUTOCONFIGLIBS
+  ifndef GDPKGCONFIG
     TERMLIBS += -lpng -lz
+  endif
   endif
   endif
 endif
 
 ifdef NEWGD
   CFLAGS += -DHAVE_LIBGD -DHAVE_GD_H -DHAVE_GD_GIF -DGIF_ANIMATION -DHAVE_GD_PNG
+ifdef GDPKGCONFIG
+  CFLAGS += $(shell pkg-config --cflags gdlib)
+endif
 ifdef JPEG
   CFLAGS += -DHAVE_GD_JPEG
   ifndef BGD
   ifndef GDAUTOCONFIGLIBS
+  ifndef GDPKGCONFIG
     TERMLIBS += -ljpeg
+  endif
   endif
   endif
 endif
@@ -377,12 +403,17 @@ ifdef FREETYPE
   CFLAGS += -DHAVE_GD_TTF
   ifndef BGD
   ifndef GDAUTOCONFIGLIBS
+  ifndef GDPKGCONFIG
     TERMLIBS += -lfreetype
+  endif
   endif
   endif
 endif
 ifdef GDAUTOCONFIGLIBS
   TERMLIBS += $(shell gdlib-config --libs)
+endif
+ifdef GDPKGCONFIG
+  TERMLIBS += $(shell pkg-config --libs gdlib)
 endif
 endif
 
@@ -409,8 +440,8 @@ endif
 
 ifdef CAIROLIBS
 	CAIRO_CFLAGS := $(shell pkg-config --cflags cairo | sed s_-Ic:_-I/c_g)
-	PANGOCAIRO_CFLAGS := $(shell pkg-config --cflags pangocairo cairo | sed s_-Ic:_-I/c_g)
-	PANGOCAIRO_LIBS := $(shell pkg-config --libs pangocairo cairo | sed s_-Lc:_-L/c_g)
+	PANGOCAIRO_CFLAGS := $(shell pkg-config --cflags glib-2.0 gobject-2.0 pangocairo cairo | sed s_-Ic:_-I/c_g)
+	PANGOCAIRO_LIBS := $(shell pkg-config --libs glib-2.0 gobject-2.0 pangocairo cairo | sed s_-Lc:_-L/c_g)
 	CAIRO_OBJS := gp_cairo.$(O) gp_cairo_helpers.$(O)
 	TERMFLAGS += $(PANGOCAIRO_CFLAGS)
 endif
@@ -481,6 +512,17 @@ ifdef CERF
 	TERMLIBS += -lcerf -lm
 endif
 
+ifdef GNUREADLINE
+ifeq ($(TARGET),gnuplot.exe)
+	CFLAGS += -DHAVE_LIBREADLINE -D HAVE_READLINE_READLINE_H -DHAVE_READLINE_HISTORY_H -DHAVE_READLINE_RESET
+	TERMLIBS += -lreadline -lncurses
+else
+	CFLAGS += -DREADLINE
+endif
+else
+	CFLAGS += -DREADLINE
+endif
+
 ifdef GNU_RC
   # RC = d:/cygnus/cygwin-b20/H-i586-cygwin32/bin/windres
   RC  = $(CCPATH)windres
@@ -502,9 +544,9 @@ else
 VERSIONING = timestamp.h
 endif
 
-PATCHLEVEL := `cat $(TOP)/PATCHLEVEL`
-MAINVERSION := `cat $(TOP)/VERSION`
-SHORTVERSION := `cut -b 2 --complement $(TOP)/VERSION`$(PATCHLEVEL)
+PATCHLEVEL := $(shell cat $(TOP)/PATCHLEVEL)
+MAINVERSION := $(shell cat $(TOP)/VERSION)
+SHORTVERSION := $(shell cut -b 2 --complement $(TOP)/VERSION)$(PATCHLEVEL)
 NUMBERS := 0 1 2 3 4 5 6 7 8 9
 ifeq ($(strip $(filter-out $(NUMBERS),$(PATCHLEVEL))),)
 LONGVERSION := $(MAINVERSION).$(PATCHLEVEL)
@@ -526,7 +568,7 @@ pipes:
 	$(MAKE) TARGET=wgnuplot_pipes.exe default
 
 docs:
-	$(MAKE) TARGET=gnuplot.exe gnuplot.pdf gpcard.pdf tutorial.pdf \
+	$(MAKE) TARGET=gnuplot.exe gnuplot.pdf \
 		ps_symbols.pdf ps_fontfile_doc.pdf ps_guide.pdf
 
 support: $(HELPFILE) $(M)bf_test.exe $(QT_TARGET) $(QT_TRANSLATION) demo_plugin.dll $(LUATARGETS) $(HELPFILEJA)
@@ -542,7 +584,7 @@ include $(S)/makefile.all
 OBJS = $(COREOBJS) version.$(O) gpexecute.$(O) $(WX_OBJS) $(CAIRO_OBJS) $(QT_OBJS)
 
 WINOBJS = winmain.$(O) wgnuplib.$(O) wgraph.$(O) wprinter.$(O) \
-	  wpause.$(O) wgdiplus.$(O)
+	  wpause.$(O) wgdiplus.$(O) wd2d.$(O)
 ifneq ($(TARGET),gnuplot.exe)
 WINOBJS += wtext.$(O) screenbuf.$(O) wmenu.$(O) wredirect.$(O)
 endif
@@ -555,7 +597,7 @@ endif
 %.$(O): $W/%.c
 	$(CC) -c $(CFLAGS) $(CFLAGSEXTRA) -MMD -MT '$*.$$(O)' -MF $*.d -o $@ $<
 
-LDLIBS = -lkernel32 -lgdi32 -lwinspool -lcomdlg32 -lcomctl32 -ladvapi32 -lshell32 -lmsimg32 -lgdiplus
+LDLIBS = -lkernel32 -lgdi32 -lwinspool -lcomdlg32 -lcomctl32 -ladvapi32 -lshell32 -lmsimg32 -lgdiplus -lshlwapi -ld2d1 -ldwrite -lole32
 LDLIBS += -lhtmlhelp
 LDFLAGS2 += -L$(HHWPATH)lib
 ifdef MINGW64
@@ -581,7 +623,7 @@ endif
 
 # explicit rules
 
-wgplt_res.$(O): $(W)/wgnuplot.rc $(W)/wgnuplib.rc $(W)/wresourc.h $(W)/texticon.ico $(W)/grpicon.ico
+wgplt_res.$(O): $(W)/wgnuplot.rc $(W)/wgnuplib.rc $(W)/wresourc.h $(W)/texticon.ico $(W)/grpicon.ico $(W)/wgnuplot.exe.manifest $(W)/wgnuplot.exe.manifest64
 	$(RC) $(RCFLAGS) $< $(RCOUT)
 	$(RES2COFF)
 
@@ -604,12 +646,15 @@ $(S)/version.c: $(TOP)/VERSION $(TOP)/PATCHLEVEL $(TOP)/ChangeLog $(S)/Makefile.
 	$(MAKE) -C $(S) srcdir=. top_srcdir=.. -f Makefile.maint version.c
 endif
 
-WINDEPS = $(W)/wgnuplib.h $(W)/wcommon.h $(W)/wresourc.h $(W)/screenbuf.h $(W)/wgdiplus.h
+WINDEPS = $(W)/wgnuplib.h $(W)/wcommon.h $(W)/wresourc.h $(W)/screenbuf.h $(W)/wgdiplus.h $(W)/wd2d.h
 
 winmain.$(O): $(W)/winmain.c $(W)/wgnuplib.h $(W)/wtext.h plot.h
 	$(CC) -c $(CFLAGS) $(CFLAGSEXTRA) -MMD -MT '$*.$$(O)' -MF $*.d -o $@ $<
 
 wgdiplus.$(O): $(W)/wgdiplus.cpp $(WINDEPS)
+	$(CXX) -c $(CFLAGS) $(CXXFLAGS) $(CFLAGSEXTRA) -MMD -MT '$*.$$(O)' -MF $*.d -o $@ $<
+
+wd2d.$(O): $(W)/wd2d.cpp $(WINDEPS)
 	$(CXX) -c $(CFLAGS) $(CXXFLAGS) $(CFLAGSEXTRA) -MMD -MT '$*.$$(O)' -MF $*.d -o $@ $<
 
 wredirect.$(O): $(W)/wredirect.cpp $(WINDEPS)
@@ -622,7 +667,7 @@ wxt_gui.$(O): $(S)/wxterminal/wxt_gui.cpp $(S)/wxterminal/wxt_gui.h
 	$(CXX) -c $(CFLAGS) $(CFLAGSEXTRA) $(CXXFLAGS) $(CAIRO_CFLAGS) -MMD -MT '$*.$$(O)' -MF $*.d -o $@ $<
 
 gp_cairo.$(O): $(S)/wxterminal/gp_cairo.c $(S)/wxterminal/gp_cairo.h
-	$(CC) -c $(CFLAGS) $(CFLAGSEXTRA) $(CXXFLAGS) $(PANGOCAIRO_CFLAGS) -MMD -MT '$*.$$(O)' -MF $*.d -o $@ $<
+	$(CC) -c $(CFLAGS) $(CFLAGSEXTRA) $(PANGOCAIRO_CFLAGS) -MMD -MT '$*.$$(O)' -MF $*.d -o $@ $<
 
 qt_term.$(O): $(S)/qtterminal/qt_term.cpp $(S)/qtterminal/qt_term.h
 	$(CXX) -c $(CFLAGS) $(CFLAGSEXTRA) $(CXXFLAGS) -MMD -MT '$*.$$(O)' -MF $*.d -o $@ $<
@@ -706,7 +751,7 @@ $(JASRC): $(D)gnuplot-ja.doc $(D)term-ja.diff $(CORETERM)
 	-mkdir $(JA)demo
 	cp -r $(TOP)/term/* $(JA)term/
 	cp -r $(TOP)/docs/* $(JA)docs/
-	cp $(M)*.dat $(M)*.png $(M)*.rgb $(JA)demo/
+	cp $(M)*.dat $(M)*.png $(M)*.rgb $(M)*.dem $(JA)demo/
 	# Apply patch for Japanese docs
 	-rm $(JAD)tex2ja.awk $(JAD)sjisenc.c
 	-(cd $(JA) ; patch -p0 -i docs/term-ja.diff)
@@ -732,11 +777,17 @@ wgnuplot-ja.chm: $(JASRC) doc2html-ja.exe \
 	-$(HHC) $(JADW)wgnuplot.hhp
 	cp $(JADW)wgnuplot.chm $(HELPFILEJA)
 
-doc2html.exe: $(D)windows/doc2html.c $(D)termdoc.c $(D)xref.c version.$(O)
-	$(LD) $(LDFLAGS) -o $@ -DWINDOWS_NO_GUI $(CFLAGS) -I. -I$(D:/=) -I$(T:/=) $^
+doc2html.exe: $(D)windows/doc2html.c $(D)termdoc.c $(D)xref.c version.$(O) $(LUA_HELP)
+	$(LD) $(LDFLAGS) -o $@ -DWINDOWS_NO_GUI \
+	    -DVERSION_MAJOR='"$(MAINVERSION)"' -DPATCHLEVEL='"$(PATCHLEVEL)"' \
+	    $(CFLAGS) -I. -I$(D:/=) -I$(T:/=) \
+	    $(D)windows/doc2html.c $(D)termdoc.c $(D)xref.c
 
-doc2html-ja.exe: $(JASRC) $(D)windows/doc2html.c $(D)termdoc.c $(D)xref.c version.$(O)
-	$(LD) $(LDFLAGS) -o $@ -DWINDOWS_NO_GUI -DJAPANESE_DOC $(CFLAGS) -I. -I$(JAD) -I$(JA)/term $(D)windows/doc2html.c $(D)termdoc.c $(D)xref.c version.$(O)
+doc2html-ja.exe: $(JASRC) $(D)windows/doc2html.c $(D)termdoc.c $(D)xref.c version.$(O) $(LUA_HELP)
+	$(LD) $(LDFLAGS) -o $@ -DWINDOWS_NO_GUI \
+	    -DVERSION_MAJOR='"$(MAINVERSION)"' -DPATCHLEVEL='"$(PATCHLEVEL)"' \
+	    -DJAPANESE_DOC $(CFLAGS) -I. -I$(JAD) -I$(JA)/term \
+	    $(D)windows/doc2html.c $(D)termdoc.c $(D)xref.c
 
 doc2ms.exe: $(D)doc2ms.c $(D)termdoc.c $(D)xref.c version.$(O) $(LUA_HELP)
 	$(LD) $(LDFLAGS) -o $@ -DWINDOWS_NO_GUI $(CFLAGS) -I. -I$(D:/=) -I$(T:/=) $(D)doc2ms.c $(D)termdoc.c $(D)xref.c version.$(O)
@@ -758,9 +809,10 @@ config.h: $(TOP)/config/config.mgw
 # generate LUA TeX support files and terminal help
 ifdef LUA
 gnuplot-lua-tikz.sty: $(T)/lua/gnuplot-tikz.lua
-	$(LUA) $< style
+	$(LUA).exe $< style
+
 $(LUA_HELP): $(T)/lua/gnuplot-tikz.lua
-	$(LUA) $< termhelp > $@
+	$(LUA).exe $< termhelp > $@
 endif
 
 
@@ -848,24 +900,22 @@ TUT = $(TOP)/tutorial
 tutorial.pdf: $(TUT)/eg1.plt $(TUT)/eg2.plt $(TUT)/eg3.plt $(TUT)/eg4.plt \
 	$(TUT)/eg5.plt $(TUT)/eg6.plt $(TUT)/eg7.plt $(TUT)/linepoin.plt \
 	$(TUT)/test.plt $(TUT)/test_tikz.plt $(TUT)/tutorial.tex
-	GNUPLOT_LIB=$(TUT) gnuplot eg1.plt
-	GNUPLOT_LIB=$(TUT) gnuplot eg2.plt
-	GNUPLOT_LIB=$(TUT) gnuplot eg3.plt
-	GNUPLOT_LIB=$(TUT) gnuplot eg4.plt
-	GNUPLOT_LIB=$(TUT) gnuplot eg5.plt
-	GNUPLOT_LIB=$(TUT) gnuplot eg6.plt
-	GNUPLOT_LIB=$(TUT) GNUPLOT_PS_DIR=$(T)PostScript gnuplot eg7.plt
-	GNUPLOT_LIB=$(TUT) gnuplot linepoin.plt
-	GNUPLOT_LIB=$(TUT) gnuplot test.plt
-	GNUPLOT_LIB=$(TUT) GNUPLOT_LUA_DIR=$(T)lua gnuplot test_tikz.plt
-	# run latex twice to get refernces right
+	GNUPLOT_LIB=$(TUT) ./$(TARGET) eg1.plt
+	GNUPLOT_LIB=$(TUT) ./$(TARGET) eg2.plt
+	GNUPLOT_LIB=$(TUT) ./$(TARGET) eg3.plt
+	GNUPLOT_LIB=$(TUT) ./$(TARGET) eg4.plt
+	GNUPLOT_LIB=$(TUT) ./$(TARGET) eg5.plt
+	GNUPLOT_LIB=$(TUT) ./$(TARGET) eg6.plt
+	GNUPLOT_LIB=$(TUT) GNUPLOT_PS_DIR=$(T)PostScript ./$(TARGET) eg7.plt
+	GNUPLOT_LIB=$(TUT) ./$(TARGET) linepoin.plt
+	GNUPLOT_LIB=$(TUT) ./$(TARGET) test.plt
+#ifdef LUA
+	GNUPLOT_LIB=$(TUT) GNUPLOT_LUA_DIR=$(T)lua ./$(TARGET) test_tikz.plt
+#endif
+	# run latex twice to get references right
 	TEXINPUTS=.:$(TUT) latex tutorial.tex
 	TEXINPUTS=.:$(TUT) latex tutorial.tex
 	dvipdfm tutorial.dvi
-
-gpcard.pdf: $(D)gpcard.tex
-	TEXINPUTS=$(TOP):$(D):${TEXINPUTS}: tex gpcard.tex
-	dvipdfm gpcard.dvi
 
 ps_symbols.pdf: $(D)psdoc/ps_symbols.gpi
 	GNUPLOT_LIB=$(D)psdoc GNUPLOT_PS_DIR=$(T)PostScript ./$(TARGET) -d ps_symbols.gpi
@@ -906,7 +956,7 @@ veryclean: clean
 	$(RM) gnuplot_qt.exe qtgnuplot_*.qm
 	$(RM) $(HELPFILE) $(HELPFILEJA) wgnuplot.chw wgnuplot.gid wgnuplot.mnu
 	$(RM) gnuplot.ps gnuplot.pdf
-	$(RM) gpcard.pdf tutorial.pdf
+	-$(RM) tutorial.pdf
 	$(RM) ps_fontfile_doc.pdf ps_fontfile_doc.ps ps_guide.pdf
 	$(RM) ps_symbols.ps ps_symbols.pdf
 	$(RM) $(M)binary[123] $(M)fit.log $(M)soundfit.par
@@ -979,14 +1029,13 @@ endif
 	-cp -p $(M)* $(DESTDIR)/demo/
 	mkdir -p $(DESTDIR)/demo/games
 	-cp -p $(M)/games/* $(DESTDIR)/demo/games/
-	mkdir -p $(DESTDIR)/contrib/pm3d/
-	-cp -p $(TOP)/pm3d/contrib/* $(DESTDIR)/contrib/pm3d/
+#	mkdir -p $(DESTDIR)/contrib/pm3d/
+#	-cp -p $(TOP)/pm3d/contrib/* $(DESTDIR)/contrib/pm3d/
 # docs
 	mkdir -p $(DESTDIR)/docs
 	-cp -p gnuplot.pdf $(DESTDIR)/docs/
 	cp -p $(TOP)/FAQ.pdf $(DESTDIR)/docs/
-	-cp -p gpcard.pdf $(DESTDIR)/docs/
-	-cp -p tutorial.pdf $(DESTDIR)/docs/
+	#-cp -p tutorial.pdf $(DESTDIR)/docs/
 	mkdir -p $(DESTDIR)/docs/psdoc
 	cp -p $(D)psdoc/ps_file.doc $(DESTDIR)/docs/psdoc/ps_file_doc.txt
 	cp -p $(D)psdoc/ps_guide.ps $(DESTDIR)/docs/psdoc/
@@ -998,6 +1047,26 @@ endif
 ifdef EXTRADIST
 	cp -pR $(EXTRADIST)/* $(DESTDIR)/
 endif
+# required DLLs
+ifdef DLLS
+ifdef MINGW64
+ifndef M32
+	ldd gnuplot.exe gnuplot_qt.exe | cut -d " " -f 3 | grep "^/mingw64/bin" | sort | uniq | xargs -t -i cp {} $(DESTDIR)/bin
+ifdef QT
+	-mkdir $(DESTDIR)/bin/platforms
+	cp /mingw64/share/qt5/plugins/platforms/qminimal.dll $(DESTDIR)/bin/platforms
+	cp /mingw64/share/qt5/plugins/platforms/qwindows.dll $(DESTDIR)/bin/platforms
+endif # QT
+else # !M32
+	ldd gnuplot.exe gnuplot_qt.exe | cut -d " " -f 3 | grep "^/mingw32/bin" | sort | uniq | xargs -t -i cp {} $(DESTDIR)/bin
+ifdef QT
+	-mkdir $(DESTDIR)/bin/platforms
+	cp /mingw32/share/qt5/plugins/platforms/qminimal.dll $(DESTDIR)/bin/platforms
+	cp /mingw32/share/qt5/plugins/platforms/qwindows.dll $(DESTDIR)/bin/platforms
+endif # QT
+endif # M32
+endif # MINGW64
+endif # DLLS
 
 installer:
 	$(MAKE) DESTDIR=./dist install
@@ -1051,6 +1120,22 @@ ifdef RELEASE
 	zip -mro9 gp$(SHORTVERSION)-win32-mingw.zip gnuplot
 else
 	zip -mro9 gp$(SHORTVERSION)-`date +%Y%m%d`-win32-mingw.zip gnuplot
+endif
+endif
+
+7z:
+	$(MAKE) DESTDIR=./gnuplot install
+ifndef M32
+ifdef RELEASE
+	7za u -mx9 gp$(SHORTVERSION)-win64-mingw.7z gnuplot
+else
+	7za u -mx9 gp$(SHORTVERSION)-`date +%Y%m%d`-win64-mingw.7z gnuplot
+endif
+else
+ifdef RELEASE
+	7za u -mx9 gp$(SHORTVERSION)-win32-mingw.7z gnuplot
+else
+	7za u -mx9 gp$(SHORTVERSION)-`date +%Y%m%d`-win32-mingw.7z gnuplot
 endif
 endif
 

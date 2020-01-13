@@ -35,12 +35,6 @@
   This software is provided "as is" without express or implied warranty
   to the extent permitted by applicable law.
 
-
-
-  $Date: 2015/10/17 05:23:22 $
-  $Author: sfeam $
-  $Rev: 100 $
-
 ]]--
 
 
@@ -80,9 +74,8 @@ pgf.DEFAULT_FONT_V_CHAR = 308
 
 pgf.STYLE_FILE_BASENAME = "gnuplot-lua-tikz"  -- \usepackage{gnuplot-lua-tikz}
 
-pgf.REVISION = string.sub("$Rev: 100 $",7,-3)
-pgf.REVISION_DATE = string.gsub("$Date: 2015/10/17 05:23:22 $",
-                                "$Date: ([0-9]+).([0-9]+).([0-9]+) .*","%1/%2/%3")
+pgf.REVISION = "108"
+pgf.REVISION_DATE = "2019/06/10 03:12:00"
 
 pgf.styles = {}
 
@@ -268,7 +261,7 @@ pgf.write_graph_begin = function (font, noenv)
   end
   gp.write(string.format("%s[gnuplot%s]\n", gfx.format[gfx.opt.tex_format].begintikzpicture, global_opt))
   gp.write(string.format("%%%% generated with GNUPLOT %sp%s (%s; terminal rev. %s, script rev. %s)\n",
-      term.gp_version, term.gp_patchlevel, _VERSION, string.sub(term.lua_term_revision,7,-3), pgf.REVISION))
+      term.gp_version, term.gp_patchlevel, _VERSION, string.sub(term.lua_term_revision,7,-2), pgf.REVISION))
   if not gfx.opt.notimestamp then
     gp.write(string.format("%%%% %s\n", os.date()))
   end
@@ -431,6 +424,10 @@ end
 pgf.draw_fill = function(t, pattern, color, saturation, opacity)
   local fill_path = ''
   local fill_style = color
+
+  if #t < 2 then
+    return
+  end
   
   if saturation < 100 then
     fill_style = fill_style .. ",color=.!"..saturation;
@@ -496,7 +493,8 @@ pgf.draw_raw_rgb_image = function(t, m, n, ll, ur, xfile)
   local ys = sf("%.3f", pgf.transform_ycoord(ur[2]) - pgf.transform_ycoord(ll[2]))
   gw("\\def\\gprawrgbimagedata{%\n  ")
   for cnt = 1,#t do
-    gw(sf("%02x%02x%02x", 255*t[cnt][1]+0.5, 255*t[cnt][2]+0.5, 255*t[cnt][3]+0.5))
+    gw(sf("%02x%02x%02x", math.floor(255*t[cnt][1]+0.5),
+          math.floor(255*t[cnt][2]+0.5), math.floor(255*t[cnt][3]+0.5)))
     if (cnt % 16) == 0 then
       gw("%\n  ")
     end
@@ -564,7 +562,7 @@ pgf.write_variables = function(t)
   end
 end
 
--- write style to seperate file, or whatever...
+-- write style to separate file, or whatever...
 pgf.create_style = function()
   local name_common  = pgf.STYLE_FILE_BASENAME.."-common.tex"
   local name_latex   = pgf.STYLE_FILE_BASENAME..".sty"
@@ -603,7 +601,7 @@ f_context:write([[
 %%
 \usemodule[tikz]
 
-\usetikzlibrary[arrows,patterns,plotmarks,backgrounds]
+\usetikzlibrary[arrows,patterns,plotmarks,backgrounds,fit]
 
 \edef\tikzatcode{\the\catcode`\@}
 \edef\tikzbarcode{\the\catcode`\|}
@@ -633,13 +631,13 @@ f_tex:write([[
 %%  plain TeX wrapper for gnuplot-tikz style file
 %%
 \input tikz.tex
-\usetikzlibrary{arrows,patterns,plotmarks,backgrounds}
+\usetikzlibrary{arrows,patterns,plotmarks,backgrounds,fit}
 
 \edef\tikzatcode{\the\catcode`\@}
 \catcode`\@=11
 
 ]])
-f_tex:write("\\input "..name_common.."\n\n")
+f_tex:write("\\input "..name_common.."\n")
 f_tex:write([[
 
 \catcode`\@=\tikzatcode
@@ -669,38 +667,25 @@ f:write([[
 
 % FIXME: is there a more elegant way to determine the output format?
 
-\def\pgfsysdriver@a{pgfsys-dvi.def}       % ps
-\def\pgfsysdriver@b{pgfsys-dvipdfm.def}   % pdf
-\def\pgfsysdriver@c{pgfsys-dvipdfmx.def}  % pdf
-\def\pgfsysdriver@d{pgfsys-dvips.def}     % ps
-\def\pgfsysdriver@e{pgfsys-pdftex.def}    % pdf
-\def\pgfsysdriver@f{pgfsys-tex4ht.def}    % html
-\def\pgfsysdriver@g{pgfsys-textures.def}  % ps
-\def\pgfsysdriver@h{pgfsys-vtex.def}      % ps
-\def\pgfsysdriver@i{pgfsys-xetex.def}     % pdf
-
 \newif\ifgppdfout\gppdfoutfalse
 \newif\ifgppsout\gppsoutfalse
 
-\ifx\pgfsysdriver\pgfsysdriver@a
-  \gppsouttrue
-\else\ifx\pgfsysdriver\pgfsysdriver@b
-  \gppdfouttrue
-\else\ifx\pgfsysdriver\pgfsysdriver@c
-  \gppdfouttrue
-\else\ifx\pgfsysdriver\pgfsysdriver@d
-  \gppsouttrue
-\else\ifx\pgfsysdriver\pgfsysdriver@e
-  \gppdfouttrue
-\else\ifx\pgfsysdriver\pgfsysdriver@f
-  % tex4ht
-\else\ifx\pgfsysdriver\pgfsysdriver@g
-  \gppsouttrue
-\else\ifx\pgfsysdriver\pgfsysdriver@h
-  \gppsouttrue
-\else\ifx\pgfsysdriver\pgfsysdriver@i
-  \gppdfouttrue
-\fi\fi\fi\fi\fi\fi\fi\fi\fi
+\expandafter\def\csname gnuplot@select@driver@pgfsys-dvi.def\endcsname     {\gppsouttrue}  % ps
+\expandafter\def\csname gnuplot@select@driver@pgfsys-dvipdfm.def\endcsname {\gppdfouttrue} % pdf
+\expandafter\def\csname gnuplot@select@driver@pgfsys-dvipdfmx.def\endcsname{\gppdfouttrue} % pdf
+\expandafter\def\csname gnuplot@select@driver@pgfsys-dvips.def\endcsname   {\gppsouttrue}  % ps
+\expandafter\def\csname gnuplot@select@driver@pgfsys-pdftex.def\endcsname  {\gppdfouttrue} % pdf
+\expandafter\def\csname gnuplot@select@driver@pgfsys-tex4ht.def\endcsname  {}              % html
+\expandafter\def\csname gnuplot@select@driver@pgfsys-textures.def\endcsname{\gppsouttrue}  % ps
+\expandafter\def\csname gnuplot@select@driver@pgfsys-vtex.def\endcsname    {\gppsouttrue}  % ps
+\expandafter\def\csname gnuplot@select@driver@pgfsys-xetex.def\endcsname   {\gppdfouttrue} % pdf
+\expandafter\def\csname gnuplot@select@driver@pgfsys-luatex.def\endcsname  {\gppdfouttrue} % pdf
+
+\ifcsname gnuplot@select@driver@\pgfsysdriver\endcsname
+  \csname gnuplot@select@driver@\pgfsysdriver\endcsname
+\else
+  \errmessage{The driver \pgfsysdriver\space is not supported by gnuplot-lua-tikz}%
+\fi
 
 % uncomment the following lines to make font values "appendable"
 % and if you are really sure about that ;-)
@@ -1158,13 +1143,13 @@ pgf.print_help = function(fwrite)
  for every linetype. The default plotstyle is 'smooth' for every
  linetype >= 1.
 
- By using the 'tikzarrows' option the gnuplot arrow styles defined by
- the user will be mapped to TikZ arrow styles. This is done by 'misusing'
- the angle value of the arrow definition. E.g. an arrow style with the
- angle '7' will be mapped to the TikZ style 'gp arrow 7' ignoring all the
- other given values. By default the TikZ terminal uses the stealth' arrow
- tips for all arrows. To obtain the default gnuplot behaviour please use
- the 'gparrows' option.
+ By default the tikz terminal produces simple LaTeX arrows.
+ To produce arrows in accord with gnuplot's 'arrowstyle' settings,
+ use the 'gparrows' option.  The 'tikzarrows' option is a third alternative
+ that bypasses both of these. Instead the arrowstyle 'angle' parameter is
+ used to index a set of 12 pre-defined TikZ arrow styles.
+ E.g. an arrow style with the angle '7' will be mapped to the TikZ style
+ 'gp arrow 7' ignoring all other arrowstyle settings.
 
  With 'cmykimages' the CMYK color model will be used for inline image data
  instead of the RGB model. All other colors (like line colors etc.) are
@@ -1174,7 +1159,7 @@ pgf.print_help = function(fwrite)
  By using the 'externalimages' option all bitmap images will be written
  as external PNG images and included at compile time of the document.
  Generating DVI and later postscript files requires to convert the PNGs
- into EPS files in a seperate step e.g. by using ImageMagick's `convert`.
+ into EPS files in a separate step e.g. by using ImageMagick's `convert`.
  Transparent bitmap images are always generated as an external PNGs.
 
  The 'nobitmap' option let images be rendered as filled rectangles instead
@@ -1333,7 +1318,8 @@ gfx.format.latex = {
   docheader        = "\\documentclass["..pgf.DEFAULT_FONT_SIZE.."pt]{article}\n"
                       .."\\usepackage[T1]{fontenc}\n"
                       .."\\usepackage{textcomp}\n\n"
-                      .."\\usepackage[utf8x]{inputenc}\n\n"
+                      .."\\usepackage[utf8x]{inputenc}\n"
+                      .."\\SetUnicodeOption{mathletters}\n\n"
                       .."\\usepackage{"..pgf.STYLE_FILE_BASENAME.."}\n"
                       .."\\pagestyle{empty}\n"
                       .."\\usepackage[active,tightpage]{preview}\n"
@@ -1384,8 +1370,13 @@ gfx.TEXT_ANCHOR = {
   ["right"]  = "gp node right"
 }
 
-gfx.HEAD_STR = {"", "->", "<-", "<->"}
-
+-- expand bit patterns to integers
+gfx.HEAD_STR = {"", "->", "<-", "<->", 
+                ",draw opacity=0", "->,draw opacity=0", "<-,draw opacity=0", "<->,draw opacity=0",
+		""}
+gfx.HEAD90_STR = {"", "-|", "|-", "|-|",
+                ",draw opacity=0", "-|,draw opacity=0", "|-,draw opacity=0", "|-|,draw opacity=0",
+		""}
 
 -- conversion factors in `cm'
 gfx.units = {
@@ -1555,7 +1546,7 @@ gfx.check_dashtype = function()
     if type(gfx.dashtype_idx) == type(1) then
       if gfx.dashtype_idx == -1 or gfx.dashtype_idx == -2 then
         pgf.set_dashtype(pgf.styles.dashtypes_axes[math.abs(gfx.dashtype_idx)][1])
-      elseif gfx.dashtype_idx > 0 then
+      elseif gfx.dashtype_idx >= 0 then
         pgf.set_dashtype(pgf.styles.dashtypes[(gfx.dashtype_idx % #pgf.styles.dashtypes) + 1][1])
       end
     else
@@ -1629,7 +1620,7 @@ gfx.format_color = function(ctype, val)
   elseif ctype == 'RGBA' then
     c = string.format("rgb color={%.3f,%.3f,%.3f}", val[1], val[2], val[3])
   elseif ctype == 'GRAY' then
-    c = string.format("color=black!%i", 100*val[1]+0.5)
+    c = string.format("color=black!%i", math.floor(100*val[1]+0.5))
   end
   return c
 end
@@ -1753,8 +1744,9 @@ term.options = function(opt_str, initial, t_count)
       if s_end then
         o_next = string.sub(opt_str, s_start+1, s_end-1)
         if next_char == '"' then
-          -- Wow! this is to resolve all string escapes, kind of "unescape string"
-          o_next = assert(loadstring("return(\""..o_next.."\")"))()
+          -- this is to resolve all string escapes, kind of "unescape string"
+          -- lua 5.2 deprecated loadstring in favor of load
+          o_next = assert(load("return(\""..o_next.."\")"))()
         end
         o_type = "string"
       else
@@ -1853,7 +1845,7 @@ term.options = function(opt_str, initial, t_count)
       get_next_token()
       gfx.opt.plotsize_x, gfx.opt.plotsize_y = get_two_sizes(o_next)
       if not gfx.opt.plotsize_x then
-        gp.int_error(t_count, string.format("error: two comma seperated lengths expected, got `%s'.", o_next))
+        gp.int_error(t_count, string.format("error: two comma separated lengths expected, got `%s'.", o_next))
       end
       gfx.opt.set_plotsize = true
       term_opt_size = string.format("plotsize %s,%s ", gfx.opt.plotsize_x, gfx.opt.plotsize_y)
@@ -1865,7 +1857,7 @@ term.options = function(opt_str, initial, t_count)
       get_next_token()
       local plotsize_x, plotsize_y = get_two_sizes(o_next)
       if not plotsize_x then
-        gp.int_error(t_count, string.format("error: two comma seperated lengths expected, got `%s'.", o_next))
+        gp.int_error(t_count, string.format("error: two comma separated lengths expected, got `%s'.", o_next))
       end
       gfx.opt.set_plotsize = false
       term_opt_size = string.format("size %s,%s ", plotsize_x, plotsize_y)
@@ -1875,13 +1867,13 @@ term.options = function(opt_str, initial, t_count)
       get_next_token()
       charsize_h, charsize_v = get_two_sizes(o_next)
       if not charsize_h then
-        gp.int_error(t_count, string.format("error: two comma seperated lengths expected, got `%s'.", o_next))
+        gp.int_error(t_count, string.format("error: two comma separated lengths expected, got `%s'.", o_next))
       end
     elseif almost_equals(o_next, "sc$ale") then
       get_next_token()
       local xscale, yscale = get_two_sizes(o_next)
       if not xscale then
-        gp.int_error(t_count, string.format("error: two comma seperated numbers expected, got `%s'.", o_next))
+        gp.int_error(t_count, string.format("error: two comma separated numbers expected, got `%s'.", o_next))
       end
       term_opt_scale = string.format("scale %s,%s ",xscale, yscale)
       term.xmax = term.xmax * xscale
@@ -1893,7 +1885,7 @@ term.options = function(opt_str, initial, t_count)
       for i = 1,#args do
         args[i] = tonumber(args[i])
         if args[i] == nil then
-          gp.int_error(t_count, string.format("error: list of comma seperated numbers expected, got `%s'.", o_next))
+          gp.int_error(t_count, string.format("error: list of comma separated numbers expected, got `%s'.", o_next))
         end
         args[i] = args[i] - 1
       end
@@ -2253,7 +2245,11 @@ term.arrow = function(sx, sy, ex, ey, head, length, angle, backangle, filled)
     gfx.check_linetype()
     gfx.check_dashtype()
     gfx.check_linewidth()
-    pgf.draw_arrow({{sx,sy},{ex,ey}}, gfx.HEAD_STR[head+1], headstyle)
+    if angle == 90 then
+      pgf.draw_arrow({{sx,sy},{ex,ey}}, gfx.HEAD90_STR[head+1], headstyle)
+    else
+      pgf.draw_arrow({{sx,sy},{ex,ey}}, gfx.HEAD_STR[head+1], headstyle)
+    end
     return 1
   end
 end
@@ -2301,7 +2297,10 @@ term.boxed_text = function(x, y, option)
       if (gfx.boxed_text_count > 0) then
 	 gp.write('\\node[')
 	 if (option == 'BACKGROUNDFILL') then
-	    gp.write('fill = gpbgfillcolor,')
+	    gp.write('fill={}, ')
+	    if gfx.opacity < 1.0 then
+		gp.write(string.format("opacity=%.2f, ", gfx.opacity))
+	    end
 	 else
 	    gfx.boxed_text = false
 	    gp.write('draw, gp path,')

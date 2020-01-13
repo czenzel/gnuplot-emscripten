@@ -4,7 +4,7 @@
 COREOBJS = eval.$(O) getcolor.$(O) stats.$(O) unset.$(O) breaders.$(O) \
 specfun.$(O) term.$(O) graph3d.$(O) dynarray.$(O) show.$(O) axis.$(O) \
 stdfn.$(O) util.$(O) save.$(O) util3d.$(O) tabulate.$(O) readline.$(O) \
-internal.$(O) libcerf.$(O) bitmap.$(O) hidden3d.$(O) plot3d.$(O) \
+internal.$(O) jitter.$(O) libcerf.$(O) bitmap.$(O) hidden3d.$(O) plot3d.$(O) \
 color.$(O) contour.$(O) command.$(O) multiplot.$(O) plot.$(O) scanner.$(O) \
 gadgets.$(O) plot2d.$(O) tables.$(O) time.$(O) pm3d.$(O) matrix.$(O) \
 boundary.$(O) fit.$(O) misc.$(O) alloc.$(O) external.$(O) help.$(O) \
@@ -19,10 +19,10 @@ $(T)eepic.trm $(T)emf.trm $(T)emxvga.trm $(T)epson.trm $(T)estimate.trm \
 $(T)excl.trm $(T)fig.trm $(T)gd.trm $(T)ggi.trm $(T)gpic.trm $(T)grass.trm \
 $(T)hp2648.trm $(T)hp26.trm $(T)hp500c.trm $(T)hpgl.trm $(T)hpljii.trm \
 $(T)hppj.trm $(T)imagen.trm $(T)kyo.trm $(T)latex.trm $(T)linux.trm \
-$(T)lua.trm $(T)metafont.trm $(T)metapost.trm $(T)mif.trm $(T)next.trm \
-$(T)openstep.trm $(T)pbm.trm $(T)pc.trm $(T)pdf.trm $(T)pm.trm \
+$(T)lua.trm $(T)metafont.trm $(T)metapost.trm $(T)mif.trm \
+$(T)pbm.trm $(T)pc.trm $(T)pdf.trm $(T)pm.trm \
 $(T)post.trm $(T)pslatex.trm $(T)pstricks.trm $(T)qms.trm $(T)qt.trm \
-$(T)regis.trm $(T)sun.trm $(T)svg.trm $(T)t410x.trm $(T)tek.trm \
+$(T)regis.trm $(T)svg.trm $(T)t410x.trm $(T)tek.trm \
 $(T)texdraw.trm $(T)tgif.trm $(T)tkcanvas.trm $(T)tpic.trm \
 $(T)vgagl.trm $(T)vws.trm $(T)win.trm $(T)wxt.trm $(T)x11.trm $(T)xlib.trm
 

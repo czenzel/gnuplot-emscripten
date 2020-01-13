@@ -1,5 +1,5 @@
 #ifdef INCRCSDATA
-static char RCSid[]="$Id: print.c,v 1.4 2005/01/04 13:01:38 mikulik Exp $" ;
+static char RCSid[]="$Id: print.c,v 1.3 2004/07/01 17:10:10 broeker Exp $" ;
 #endif
 
 /****************************************************************************

@@ -1,5 +1,5 @@
 /*
- * $Id: gp_types.h,v 1.63.2.1 2014/12/05 18:09:34 sfeam Exp $
+ * $Id: gp_types.h,v 1.73 2016/11/05 21:21:07 sfeam Exp $
  */
 
 /* GNUPLOT - gp_types.h */
@@ -50,6 +50,8 @@ enum DATA_TYPES {
 	CMPLX,
 	STRING,
 	DATABLOCK,
+	ARRAY,
+	NOTDEFINED,	/* exists, but value is currently undefined */
 	INVALID_VALUE,	/* used only for error return by external functions */
 	INVALID_NAME	/* used only to trap errors in linked axis function definition */
 };
@@ -59,7 +61,7 @@ enum MODE_PLOT_TYPE {
 };
 
 enum PLOT_TYPE {
-	FUNC, DATA, FUNC3D, DATA3D, NODATA
+	FUNC, DATA, FUNC3D, DATA3D, NODATA, KEYENTRY
 };
 
 /* we explicitly assign values to the types, such that we can
@@ -113,11 +115,12 @@ typedef enum PLOT_STYLE {
     SURFACEGRID  = 31*PLOT_STYLE_BITS + PLOT_STYLE_HAS_LINE,
     PARALLELPLOT = 32*PLOT_STYLE_BITS + PLOT_STYLE_HAS_LINE,
     TABLESTYLE   = 33*PLOT_STYLE_BITS,
+    ZERRORFILL   = 34*PLOT_STYLE_BITS + PLOT_STYLE_HAS_FILL,
     PLOT_STYLE_NONE = -1
 } PLOT_STYLE;
 
 typedef enum PLOT_SMOOTH {
-    SMOOTH_NONE,
+    SMOOTH_NONE = 0,
     SMOOTH_ACSPLINES,
     SMOOTH_BEZIER,
     SMOOTH_CSPLINES,
@@ -128,7 +131,9 @@ typedef enum PLOT_SMOOTH {
     SMOOTH_CUMULATIVE,
     SMOOTH_KDENSITY,
     SMOOTH_CUMULATIVE_NORMALISED,
-    SMOOTH_MONOTONE_CSPLINE
+    SMOOTH_MONOTONE_CSPLINE,
+    SMOOTH_BINS,
+    SMOOTH_FREQUENCY_NORMALISED
 } PLOT_SMOOTH;
 
 /* FIXME HBB 20000521: 'struct value' and its part, 'cmplx', should go
@@ -146,6 +151,7 @@ typedef struct value {
 	struct cmplx cmplx_val;
 	char *string_val;
 	char **data_array;
+	struct value *value_array;
     } v;
 } t_value;
 
@@ -160,18 +166,21 @@ typedef enum coord_type {
 } coord_type;
 
 
-/* These fields of 'struct coordinate' used for storing the color of 3D data
- * points (if requested by NEED_PALETTE(this_plot), for instance).
- */
-#define CRD_COLOR yhigh
+/* These fields of 'struct coordinate' hold extra properties of 3D data points */
+/* Used by splot styles RGBIMAGE and RGBA_IMAGE */
 #define CRD_R yhigh
 #define CRD_G xlow
 #define CRD_B xhigh
 #define CRD_A ylow
-/* The field of 'struct coordinate' used for storing the point size in plot
- * style POINTSTYLE with variable point size
- */
+/* Used by all splot style with variable line/point color */
+#define CRD_COLOR yhigh
+/* Used by splot styles POINTSTYLE and LINESPOINTS with variable point size */
 #define CRD_PTSIZE xlow
+/* Used by splot styles POINTSTYLE and LINESPOINTS with variable point type */
+#define CRD_PTTYPE xhigh
+/* Used by splot style ZERRORFILL */
+#define CRD_ZLOW xlow
+#define CRD_ZHIGH xhigh
 
 
 typedef struct coordinate {
@@ -187,5 +196,22 @@ typedef enum lp_class {
 	LP_ADHOC  = 2,	/* lp_style_type used for single purpose */
 	LP_NOFILL = 3	/* special treatment of fillcolor */
 } lp_class;
+
+/* Classes of time data */
+typedef enum {
+    DT_NORMAL=0,		/* default; treat values as pure numeric */
+    DT_TIMEDATE,		/* old datatype */
+    DT_DMS,			/* degrees minutes seconds */
+    DT_UNINITIALIZED,
+    DT_BAD			/* something went wrong (e.g. in gstrptime) */
+} td_type;
+
+/*
+ * Introduction of nonlinear axes makes it possible for an axis-mapping function
+ * to return "undefined" or NaN. These cannot be encoded as an integer coordinate.
+ * So we introduce an integer equivalent to NaN and provide a macro to test for
+ * whether a coordinate mapping returned it.
+ */
+#define intNaN (~((unsigned int)(~0)>>1))
 
 #endif /* GNUPLOT_GPTYPES_H */

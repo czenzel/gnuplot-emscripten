@@ -1,5 +1,5 @@
 /* Hey Emacs this is -*- C -*-
- * $Id: emf.trm,v 1.99.2.3 2016/05/06 17:39:55 sfeam Exp $
+ * $Id: emf.trm,v 1.102 2016/05/06 17:40:08 sfeam Exp $
  */
 
 /* GNUPLOT - emf.trm */
@@ -790,7 +790,7 @@ EMF_options()
 		*comma = '\0';
 	    }
 	    if (*s)
-		strncpy(emf_defaultfontname, s, sizeof(emf_defaultfontname));
+		safe_strncpy(emf_defaultfontname, s, sizeof(emf_defaultfontname));
 	    free(s);
 	    if (isanumber(c_token)) {
 		emf_defaultfontsize = int_expression();
@@ -1347,7 +1347,7 @@ EMF_put_text(unsigned int x, unsigned int y, const char str[])
     int nchars = slen;
 
 #ifdef HAVE_ICONV
-    char * wstr;
+    char * wstr = 0;
     if (encoding == S_ENC_UTF8 || encoding == S_ENC_SJIS) {
 	iconv_t cd;
 	size_t wsize, wlen, mblen;
@@ -1865,7 +1865,7 @@ ENHemf_put_text(unsigned int x, unsigned int y, const char *str)
 
     /* set up the global variables needed by enhanced_recursion() */
     enhanced_fontscale = 1.0;
-    strncpy(enhanced_escape_format,"&#x%2.2x;",sizeof(enhanced_escape_format));
+    safe_strncpy(enhanced_escape_format,"&#x%2.2x;",sizeof(enhanced_escape_format));
 
     ENHemf_opened_string = FALSE;
     ENHemf_overprint = 0;

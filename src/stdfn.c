@@ -1,5 +1,5 @@
 #ifndef lint
-static char *RCSid() { return RCSid("$Id: stdfn.c,v 1.30 2014/03/20 00:58:35 markisch Exp $"); }
+static char *RCSid() { return RCSid("$Id: stdfn.c,v 1.35 2017/02/28 06:51:28 sfeam Exp $"); }
 #endif
 
 /* GNUPLOT - stdfn.c */
@@ -41,14 +41,18 @@ static char *RCSid() { return RCSid("$Id: stdfn.c,v 1.30 2014/03/20 00:58:35 mar
  * - Lars Hecking
  */
 
+#if defined(_WIN32) && defined(__WATCOMC__)
+#  include <direct.h>
+#endif
+
 #include "stdfn.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 /* the WIN32 API has a Sleep function that does not consume CPU cycles */
 #include <windows.h>
-#ifndef HAVE_DIRENT_H
+#include "term_api.h"
+#include "win/winmain.h"
 #include <io.h> /* _findfirst and _findnext set errno iff they return -1 */
-#endif
 #endif
 #ifdef NEED_CEXP
 #include <math.h>
@@ -186,7 +190,7 @@ sleep(unsigned int delay)
     while (time(NULL) < time_is_up)
 	/* wait */ ;
 # endif
-#elif defined(WIN32)
+#elif defined(_WIN32)
     Sleep((DWORD) delay * 1000);
 #endif /* MSDOS ... */
 
@@ -455,8 +459,7 @@ void gp_exit_cleanup(void)
 static void debug_exit_handler(void)
 {
     if (exit_handlers) {
-        fprintf(stderr, "Gnuplot not exited using gp_exit(). Exit handlers may"
-                " not work correctly!\n");
+        fprintf(stderr, "Gnuplot exiting abnormally. Trying to execute exit handlers anyway.\n");
         gp_exit_cleanup();
     }
 }
@@ -486,8 +489,22 @@ void gp_exit(int status)
     exit(status);
 }
 
-#if !defined(HAVE_DIRENT_H) && defined(WIN32)  && (!defined(__WATCOMC__))
-/* BM: OpenWatcom has dirent functions in direct.h!*/
+#if _WIN32
+char *
+gp_getcwd(char *path, size_t len)
+{
+    wchar_t wpath[MAX_PATH + 1];
+    if (_wgetcwd(wpath, MAX_PATH) != NULL) {
+	WideCharToMultiByte(WinGetCodepage(encoding), 0, wpath, -1, path, len, NULL, 0);
+	return path;
+    }
+    return NULL;
+}
+#endif
+
+#ifdef _WIN32
+/* Note: OpenWatcom has dirent functions in direct.h but we use our functions
+		 since they support encodings. */
 /*
 
     Implementation of POSIX directory browsing functions and types for Win32.
@@ -500,88 +517,105 @@ void gp_exit(int status)
 
 struct DIR
 {
-    long                handle; /* -1 for failed rewind */
-    struct _finddata_t  info;
-    struct dirent       result; /* d_name null iff first time */
-    char                *name;  /* null-terminated char string */
+    intptr_t            handle; /* -1 for failed rewind */
+    struct _wfinddata_t info;
+    struct gp_dirent    result; /* d_name null iff first time */
+    WCHAR               *name;  /* null-terminated string */
+    char                info_mbname[4*260];
 };
 
-DIR *opendir(const char *name)
+
+DIR *
+gp_opendir(const char *name)
 {
     DIR *dir = 0;
+    char *mbname;
 
     if (name && name[0]) {
-        size_t base_length = strlen(name);
-         /* search pattern must end with suitable wildcard */
-        const char *all = strchr("/\\", name[base_length - 1]) ? "*" : "/*";
+	size_t base_length = strlen(name);
+	    /* search pattern must end with suitable wildcard */
+	const char *all = strchr("/\\", name[base_length - 1]) ? "*" : "/*";
 
-        if ((dir = (DIR *) malloc(sizeof *dir)) != 0 &&
-           (dir->name = (char *) malloc(base_length + strlen(all) + 1)) != 0) {
-            strcat(strcpy(dir->name, name), all);
+	if ((dir = (DIR *) malloc(sizeof *dir)) != NULL &&
+	    (mbname = (char *) malloc(base_length + strlen(all) + 1)) != NULL) {
+	    strcat(strcpy(mbname, name), all);
+	    dir->name = UnicodeText(mbname, encoding);
+	    free(mbname);
 
-            if ((dir->handle = (long) _findfirst(dir->name, &dir->info)) != -1) {
-                dir->result.d_name = 0;
-            } else { /* rollback */
-                free(dir->name);
-                free(dir);
-                dir = 0;
-            }
-        } else { /* rollback */
-            free(dir);
-            dir   = 0;
-            errno = ENOMEM;
-        }
+	    if ((dir->name != NULL) && 
+		((dir->handle = (long) _wfindfirst(dir->name, &dir->info)) != -1)) {
+		dir->result.d_name = NULL;
+	    } else { /* rollback */
+		free(dir->name);
+		free(dir);
+		dir = NULL;
+	    }
+	} else { /* rollback */
+	    free(dir);
+	    dir   = NULL;
+	    errno = ENOMEM;
+	}
     } else {
-        errno = EINVAL;
+	errno = EINVAL;
     }
 
     return dir;
 }
 
-int closedir(DIR *dir)
+
+int
+gp_closedir(DIR *dir)
 {
     int result = -1;
 
     if (dir) {
-        if(dir->handle != -1) {
-            result = _findclose(dir->handle);
-        }
-        free(dir->name);
-        free(dir);
+	if (dir->handle != -1) {
+	    result = _findclose(dir->handle);
+	}
+	free(dir->name);
+	free(dir);
     }
 
     if (result == -1) { /* map all errors to EBADF */
-        errno = EBADF;
+	errno = EBADF;
     }
 
     return result;
 }
 
-struct dirent *readdir(DIR *dir)
+
+struct gp_dirent *
+gp_readdir(DIR *dir)
 {
-    struct dirent *result = 0;
+    struct gp_dirent *result = 0;
 
     if (dir && dir->handle != -1) {
-        if (!dir->result.d_name || _findnext(dir->handle, &dir->info) != -1) {
-            result         = &dir->result;
-            result->d_name = dir->info.name;
-        }
+	if (!dir->result.d_name || _wfindnext(dir->handle, &dir->info) != -1) {
+	    result         = &dir->result;
+	    WideCharToMultiByte(WinGetCodepage(encoding), 0, 
+				dir->info.name, sizeof(dir->info.name) / sizeof(wchar_t),
+				dir->info_mbname, sizeof(dir->info_mbname) / sizeof(char),
+				NULL, 0);
+	    result->d_name = dir->info_mbname;
+	}
     } else {
-        errno = EBADF;
+	errno = EBADF;
     }
 
     return result;
 }
 
-void rewinddir(DIR *dir)
+
+void
+gp_rewinddir(DIR *dir)
 {
     if (dir && dir->handle != -1) {
-        _findclose(dir->handle);
-        dir->handle = (long) _findfirst(dir->name, &dir->info);
-        dir->result.d_name = 0;
+	_findclose(dir->handle);
+	dir->handle = (long) _wfindfirst(dir->name, &dir->info);
+	dir->result.d_name = NULL;
     }
     else {
-        errno = EBADF;
+	errno = EBADF;
     }
 }
 
@@ -593,10 +627,10 @@ void rewinddir(DIR *dir)
     documentation for any purpose is hereby granted without fee, provided
     that this copyright and permissions notice appear in all copies and
     derivatives.
-    
+
     This software is supplied "as is" without express or implied warranty.
 
     But that said, if there are any problems please get in touch.
 
 */
-#endif /* !HAVE_DIRENT_H && WIN32 */
+#endif /* _WIN32 */

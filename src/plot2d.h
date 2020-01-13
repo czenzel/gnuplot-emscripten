@@ -1,5 +1,5 @@
 /*
- * $Id: plot2d.h,v 1.15 2012/03/21 00:22:25 sfeam Exp $
+ * $Id: plot2d.h,v 1.20 2017/01/14 06:23:22 sfeam Exp $
  */
 
 /* GNUPLOT - plot2d.h */
@@ -39,6 +39,11 @@
 
 #include "syscfg.h"
 
+/* This allows a natural interpretation of providing only a single column in 'using' */
+#define default_smooth_weight(option) \
+ (option == SMOOTH_BINS || option == SMOOTH_KDENSITY || \
+  option == SMOOTH_FREQUENCY)
+
 /* Variables of plot2d.c needed by other modules: */
 
 extern struct curve_points *first_plot;
@@ -59,5 +64,7 @@ void cp_extend __PROTO((struct curve_points *cp, int num));
 #include "gadgets.h"
 struct text_label *store_label __PROTO((struct text_label *, struct coordinate *,
 					int i, char * string, double colorval));
+void parse_plot_title __PROTO((struct curve_points *this_plot, 
+					char *xtitle, char *ytitle, TBOOLEAN *set_title));
 
 #endif /* GNUPLOT_PLOT2D_H */

@@ -1,5 +1,5 @@
 /*
- * $Id: gnuplot_common.js,v 1.10 2012/05/03 20:35:22 sfeam Exp $
+ * $Id: gnuplot_common.js,v 1.9 2011/10/01 04:10:48 sfeam Exp $
  */
 // Shared routines for gnuplot's HTML5 canvas terminal driver.
 

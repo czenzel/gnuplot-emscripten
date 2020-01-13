@@ -1,5 +1,5 @@
 /*
- * $Id: bitmap.h,v 1.14 2008/11/15 19:38:54 sfeam Exp $
+ * $Id: bitmap.h,v 1.13 2004/04/13 17:23:52 broeker Exp $
  */
 
 /* GNUPLOT - bitmap.h */

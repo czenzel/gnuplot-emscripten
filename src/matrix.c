@@ -1,5 +1,5 @@
 #ifndef lint
-static char *RCSid() { return RCSid("$Id: matrix.c,v 1.14 2014/03/03 04:09:30 sfeam Exp $"); }
+static char *RCSid() { return RCSid("$Id: matrix.c,v 1.13 2014/02/28 10:20:53 markisch Exp $"); }
 #endif
 
 /*  NOTICE: Change of Copyright Status

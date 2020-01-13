@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: eval.c,v 1.119.2.4 2016/08/18 17:23:10 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - eval.c */
 
 /*[
@@ -60,7 +56,7 @@ static char *RCSid() { return RCSid("$Id: eval.c,v 1.119.2.4 2016/08/18 17:23:10
 static RETSIGTYPE fpe __PROTO((int an_int));
 
 /* Global variables exported by this module */
-struct udvt_entry udv_pi = { NULL, "pi", FALSE, {INTGR, {0} } };
+struct udvt_entry udv_pi = { NULL, "pi", {INTGR, {0} } };
 struct udvt_entry *udv_NaN;
 /* first in linked list */
 struct udvt_entry *first_udv = &udv_pi;
@@ -68,6 +64,12 @@ struct udft_entry *first_udf = NULL;
 /* pointer to first udv users can delete */
 struct udvt_entry **udv_user_head;
 
+/* Various abnormal conditions during evaluation of an action table
+ * (the stored form of an expression) are signalled by setting
+ * undefined = TRUE.
+ * NB:  A test for  "if (undefined)"  is only valid immediately
+ * following a call to evaluate_at() or eval_link_function().
+ */
 TBOOLEAN undefined;
 
 /* The stack this operates on */
@@ -120,6 +122,8 @@ const struct ft_entry GPFAR ft[] =
     {"eqs",  f_eqs},			/* for string variables only */
     {"nes",  f_nes},			/* for string variables only */
     {"[]",  f_range},			/* for string variables only */
+    {"[]",  f_index},			/* for array variables only */
+    {"||",  f_cardinality},		/* for array variables only */
     {"assign", f_assign},		/* assignment operator '=' */
     {"jump",  f_jump},
     {"jumpz",  f_jumpz},
@@ -238,7 +242,7 @@ static JMP_BUF fpe_env;
 static RETSIGTYPE
 fpe(int an_int)
 {
-#if defined(MSDOS) && !defined(__EMX__) && !defined(DJGPP) && !defined(_Windows)
+#if defined(MSDOS) && !defined(__EMX__) && !defined(DJGPP) && !defined(_WIN32)
     /* thanks to lotto@wjh12.UUCP for telling us about this  */
     _fpreset();
 #endif
@@ -266,6 +270,8 @@ real(struct value *val)
 	return (val->v.cmplx_val.real);
     case STRING:              /* is this ever used? */
 	return (atof(val->v.string_val));
+    case NOTDEFINED:
+	return not_a_number();
     default:
 	int_error(NO_CARET, "unknown type in real()");
     }
@@ -307,6 +313,8 @@ imag(struct value *val)
 	/*     x = 2;  plot sprintf(format,x)         */
 	int_warn(NO_CARET, "encountered a string when expecting a number");
 	int_error(NO_CARET, "Did you try to generate a file name using dummy variable x or y?");
+    case NOTDEFINED:
+	return not_a_number();
     default:
 	int_error(NO_CARET, "unknown type in imag()");
     }
@@ -401,24 +409,46 @@ struct value *
 Gstring(struct value *a, char *s)
 {
     a->type = STRING;
-    a->v.string_val = s;
+    a->v.string_val = s ? s : strdup("");
     return (a);
 }
 
 /* It is always safe to call gpfree_string with a->type is INTGR or CMPLX.
  * However it would be fatal to call it with a->type = STRING if a->string_val
  * was not obtained by a previous call to gp_alloc(), or has already been freed.
- * Thus 'a->type' is set to INTGR afterwards to make subsequent calls safe.
+ * Thus 'a->type' is set to NOTDEFINED afterwards to make subsequent calls safe.
  */
 struct value *
 gpfree_string(struct value *a)
 {
     if (a->type == STRING) {
 	free(a->v.string_val);
-	/* I would have set it to INVALID if such a type existed */
-	a->type = INTGR;
+	a->type = NOTDEFINED;
     }
+
+    else if (a->type == ARRAY) {
+	/* gpfree_array() is now a separate routine. This is to help find */
+	/* any remaining callers who expect gpfree_string to handle it.   */
+	FPRINTF((stderr,"eval.c:%d hit array in gpfree_string()", __LINE__));
+	a->type = NOTDEFINED;
+    }
+
     return a;
+}
+
+void
+gpfree_array(struct value *a)
+{
+    int i;
+    int size;
+
+    if (a->type == ARRAY) {
+	size = a->v.value_array[0].v.int_val;
+	for (i=1; i<=size; i++)
+	    gpfree_string(&(a->v.value_array[i]));
+	free(a->v.value_array);
+	a->type = NOTDEFINED;
+    }
 }
 
 /* some machines have trouble with exp(-x) for large x
@@ -483,7 +513,6 @@ pop_or_convert_from_string(struct value *v)
 {
     (void) pop(v);
 
-    /* DEBUG Dec 2014 - Consolidate sanity check for variable type */
     /* FIXME: Test for INVALID_VALUE? Other corner cases? */
     if (v->type == INVALID_NAME)
 	int_error(NO_CARET, "invalid dummy variable name");
@@ -491,7 +520,8 @@ pop_or_convert_from_string(struct value *v)
     if (v->type == STRING) {
 	char *eov;
 
-	if (strspn(v->v.string_val,"0123456789 ") == strlen(v->v.string_val)) {
+	if (*(v->v.string_val)
+	&&  strspn(v->v.string_val,"0123456789 ") == strlen(v->v.string_val)) {
 	    int i = atoi(v->v.string_val);
 	    gpfree_string(v);
 	    Ginteger(v, i);
@@ -500,6 +530,7 @@ pop_or_convert_from_string(struct value *v)
 	    if (v->v.string_val == eov) {
 		gpfree_string(v);
 		int_error(NO_CARET,"Non-numeric string found where a numeric expression was expected");
+		/* Note: This also catches syntax errors like "set term ''*0 " */
 	    }
 	    gpfree_string(v);
 	    Gcomplex(v, d, 0.);
@@ -515,9 +546,37 @@ push(struct value *x)
     if (s_p == STACK_DEPTH - 1)
 	int_error(NO_CARET, "stack overflow");
     stack[++s_p] = *x;
+
     /* WARNING - This is a memory leak if the string is not later freed */
     if (x->type == STRING && x->v.string_val)
 	stack[s_p].v.string_val = gp_strdup(x->v.string_val);
+
+#ifdef ARRAY_COPY_ON_REFERENCE
+    /* NOTE: Without this code, any operation during expression evaluation that */
+    /* alters the content of an existing array would potentially corrupt the	*/
+    /* original copy.  E.g. "Array A[3];  B=A" would result in a new variable B	*/
+    /* that points to the same content as the original array A.  This problem	*/
+    /* can be avoided by making a copy of the original array when pushing it on	*/
+    /* the evaluation stack.  Any change or persistance of the copy does not	*/
+    /* corrupt the original.  However there are two penalties from this.   	*/
+    /* (1) Every reference, including retrieval of a single array element, 	*/
+    /* triggers a sequence of copy/evaluate/free so it is very wasteful.  	*/
+    /* (2) The lifetime of the copy is problematic.  Enabling this code in its	*/
+    /* current state will almost certainly reveal memory leaks or double-free	*/
+    /* failures.  Some compromise (detect and allow a simple copy but nothing	*/
+    /* else?) might be possible so this code is left as a starting point.  	*/
+    if (x->type == ARRAY) {
+	int i;
+	int array_size = x->v.value_array[0].v.int_val + 1;
+	stack[s_p].v.value_array = gp_alloc(array_size * sizeof(struct value), "push copy of array");
+	memcpy(stack[s_p].v.value_array, x->v.value_array, array_size*sizeof(struct value));
+	for (i=1; i<array_size; i++) 
+	    if (stack[s_p].v.value_array[i].type == STRING) {
+		stack[s_p].v.value_array[i].v.string_val
+		= strdup(stack[s_p].v.value_array[i].v.string_val);
+	    }
+    }
+#endif
 }
 
 
@@ -627,13 +686,17 @@ execute_at(struct at_type *at_ptr)
     jump_offset = saved_jump_offset;
 }
 
-/* May 2013: Old hackery #ifdef'ed out so that input of Inf/NaN */
-/* values through evaluation is treated equivalently to direct  */
-/* input of a formated value.  See revised imageNaN demo.       */
+/* As of May 2013 input of Inf/NaN values through evaluation is treated */
+/* equivalently to direct input of a formated value.  See imageNaN.dem. */
 void
 evaluate_at(struct at_type *at_ptr, struct value *val_ptr)
 {
+    /* A test for if (undefined) is allowed only immediately following
+     * evalute_at() or eval_link_function().  Both must clear it on entry
+     * so that the value on return reflects what really happened.
+     */
     undefined = FALSE;
+
     errno = 0;
     reset_stack();
 
@@ -650,36 +713,20 @@ evaluate_at(struct at_type *at_ptr, struct value *val_ptr)
 
     if (errno == EDOM || errno == ERANGE)
 	undefined = TRUE;
-#if (1)	/* New code */
     else if (!undefined) {
 	(void) pop(val_ptr);
 	check_stack();
     }
 
-#else /* Old hackery */
-    else if (!undefined) { /* undefined (but not errno) may have been set by matherr */
-	(void) pop(val_ptr);
-	check_stack();
-	/* At least one machine (ATT 3b1) computes Inf without a SIGFPE */
-	if (val_ptr->type != STRING) {
-	    double temp = real(val_ptr);
-	    if (temp > VERYLARGE || temp < -VERYLARGE)
-		undefined = TRUE;
-	}
+    if (!undefined && val_ptr->type == ARRAY) {
+	/* Aug 2016: error rather than warning because too many places
+	 * cannot deal with UNDEFINED or NaN where they were expecting a number
+	 * E.g. load_one_range()
+	 */
+	val_ptr->type = NOTDEFINED;
+	if (!string_result_only)
+	    int_error(NO_CARET, "evaluate_at: unsupported array operation");
     }
-#if defined(NeXT) || defined(ultrix)
-    /*
-     * linux was able to fit curves which NeXT gave up on -- traced it to
-     * silently returning NaN for the undefined cases and plowing ahead
-     * I can force that behavior this way.  (0.0/0.0 generates NaN)
-     */
-    if (undefined && (errno == EDOM || errno == ERANGE)) {	/* corey@cac */
-	undefined = FALSE;
-	errno = 0;
-	Gcomplex(val_ptr, 0.0 / 0.0, 0.0 / 0.0);
-    }
-#endif /* NeXT || ultrix */
-#endif /* old hackery */
 }
 
 void
@@ -690,7 +737,7 @@ real_free_at(struct at_type *at_ptr)
      * freed before destruction. */
     if (!at_ptr)
         return;
-    for(i=0; i<at_ptr->a_count; i++) {
+    for (i=0; i<at_ptr->a_count; i++) {
 	struct at_entry *a = &(at_ptr->actions[i]);
 	/* if union a->arg is used as a->arg.v_arg free potential string */
 	if ( a->index == PUSHC || a->index == DOLLARS )
@@ -729,8 +776,7 @@ add_udv_by_name(char *key)
 	gp_alloc(sizeof(struct udvt_entry), "value");
     (*udv_ptr)->next_udv = NULL;
     (*udv_ptr)->udv_name = gp_strdup(key);
-    (*udv_ptr)->udv_undef = TRUE;
-    (*udv_ptr)->udv_value.type = 0;
+    (*udv_ptr)->udv_value.type = NOTDEFINED;
     return (*udv_ptr);
 }
 
@@ -764,17 +810,19 @@ del_udv_by_name(char *key, TBOOLEAN wildcard)
 
  	/* exact match */
 	else if (!wildcard && !strcmp(key, udv_ptr->udv_name)) {
-	    udv_ptr->udv_undef = TRUE;
+	    gpfree_array(&(udv_ptr->udv_value));
 	    gpfree_string(&(udv_ptr->udv_value));
 	    gpfree_datablock(&(udv_ptr->udv_value));
+	    udv_ptr->udv_value.type = NOTDEFINED;
 	    break;
 	}
 
 	/* wildcard match: prefix matches */
 	else if ( wildcard && !strncmp(key, udv_ptr->udv_name, strlen(key)) ) {
-	    udv_ptr->udv_undef = TRUE;
+	    gpfree_array(&(udv_ptr->udv_value));
 	    gpfree_string(&(udv_ptr->udv_value));
 	    gpfree_datablock(&(udv_ptr->udv_value));
+	    udv_ptr->udv_value.type = NOTDEFINED;
 	    /* no break - keep looking! */
 	}
 
@@ -802,6 +850,7 @@ clear_udf_list()
 
 static void update_plot_bounds __PROTO((void));
 static void fill_gpval_axis __PROTO((AXIS_INDEX axis));
+static void fill_gpval_sysinfo __PROTO((void));
 static void set_gpval_axis_sth_double __PROTO((const char *prefix, AXIS_INDEX axis, const char *suffix, double value, int is_int));
 
 static void
@@ -815,7 +864,6 @@ set_gpval_axis_sth_double(const char *prefix, AXIS_INDEX axis, const char *suffi
     v = add_udv_by_name(s);
     if (!v) 
 	return; /* should not happen */
-    v->udv_undef = FALSE;
     if (is_int)
 	Ginteger(&v->udv_value, (int)(value+0.5));
     else
@@ -848,10 +896,8 @@ fill_gpval_string(char *var, const char *stringvalue)
     struct udvt_entry *v = add_udv_by_name(var);
     if (!v)
 	return;
-    if (v->udv_undef == FALSE && !strcmp(v->udv_value.v.string_val, stringvalue))
+    if (v->udv_value.type == STRING && !strcmp(v->udv_value.v.string_val, stringvalue))
 	return;
-    if (v->udv_undef)
-	v->udv_undef = FALSE;
     else
 	gpfree_string(&v->udv_value);
     Gstring(&v->udv_value, gp_strdup(stringvalue));
@@ -863,7 +909,6 @@ fill_gpval_integer(char *var, int value)
     struct udvt_entry *v = add_udv_by_name(var);
     if (!v)
 	return;
-    v->udv_undef = FALSE;
     Ginteger(&v->udv_value, value);
 }
 
@@ -873,7 +918,6 @@ fill_gpval_float(char *var, double value)
     struct udvt_entry *v = add_udv_by_name(var);
     if (!v)
 	return;
-    v->udv_undef = FALSE;
     Gcomplex(&v->udv_value, value, 0);
 }
 
@@ -883,7 +927,6 @@ fill_gpval_complex(char *var, double areal, double aimag)
     struct udvt_entry *v = add_udv_by_name(var);
     if (!v)
 	return;
-    v->udv_undef = FALSE;
     Gcomplex(&v->udv_value, areal, aimag);
 }
 
@@ -901,6 +944,9 @@ update_plot_bounds(void)
     fill_gpval_integer("GPVAL_TERM_XSIZE", canvas.xright+1);
     fill_gpval_integer("GPVAL_TERM_YSIZE", canvas.ytop+1);
     fill_gpval_integer("GPVAL_TERM_SCALE", term->tscale);
+    /* May be useful for debugging font problems */
+    fill_gpval_integer("GPVAL_TERM_HCHAR", term->h_char);
+    fill_gpval_integer("GPVAL_TERM_VCHAR", term->v_char);
 }
 
 /*
@@ -939,6 +985,17 @@ update_gpval_variables(int context)
 	fill_gpval_float("GPVAL_VIEW_ROT_Z", surface_rot_z);
 	fill_gpval_float("GPVAL_VIEW_SCALE", surface_scale);
 	fill_gpval_float("GPVAL_VIEW_ZSCALE", surface_zscale);
+	fill_gpval_float("GPVAL_VIEW_AZIMUTH", azimuth);
+
+	/* Screen coordinates of 3D rotational center and radius of the sphere */
+	/* in which x/y axes are drawn after 'set view equal xy[z]' */
+	fill_gpval_float("GPVAL_VIEW_XCENT",
+		(double)(canvas.xright+1 - xmiddle)/(double)(canvas.xright+1));
+	fill_gpval_float("GPVAL_VIEW_YCENT", 
+		1.0 - (double)(canvas.ytop+1 - ymiddle)/(double)(canvas.ytop+1));
+	fill_gpval_float("GPVAL_VIEW_RADIUS", 
+		0.5 * surface_scale * xscaler/(double)(canvas.xright+1));
+
 	return;
     }
 
@@ -956,6 +1013,8 @@ update_gpval_variables(int context)
 	fill_gpval_string("GPVAL_OUTPUT", (outstr) ? outstr : "");
 	fill_gpval_string("GPVAL_ENCODING", encoding_names[encoding]);
 	fill_gpval_string("GPVAL_MINUS_SIGN", minus_sign ? minus_sign : "-");
+	fill_gpval_string("GPVAL_MICRO", micro ? micro : "u");
+	fill_gpval_string("GPVAL_DEGREE_SIGN", degree_sign);
     }
 
     /* If we are called from int_error() then set the error state */
@@ -966,15 +1025,13 @@ update_gpval_variables(int context)
     if (context == 3) {
 	struct udvt_entry *v = add_udv_by_name("GPVAL_VERSION");
 	char *tmp;
-	if (v && v->udv_undef == TRUE) {
-	    v->udv_undef = FALSE;
+	if (v && v->udv_value.type == NOTDEFINED)
 	    Gcomplex(&v->udv_value, atof(gnuplot_version), 0);
-	}
 	v = add_udv_by_name("GPVAL_PATCHLEVEL");
-	if (v && v->udv_undef == TRUE)
+	if (v && v->udv_value.type == NOTDEFINED)
 	    fill_gpval_string("GPVAL_PATCHLEVEL", gnuplot_patchlevel);
 	v = add_udv_by_name("GPVAL_COMPILE_OPTIONS");
-	if (v && v->udv_undef == TRUE)
+	if (v && v->udv_value.type == NOTDEFINED)
 	    fill_gpval_string("GPVAL_COMPILE_OPTIONS", compile_options);
 
 	/* Start-up values */
@@ -991,26 +1048,84 @@ update_gpval_variables(int context)
 	/* Permanent copy of user-clobberable variables pi and NaN */
 	fill_gpval_float("GPVAL_pi", M_PI);
 	fill_gpval_float("GPVAL_NaN", not_a_number());
+
+	/* System information */
+	fill_gpval_sysinfo();
     }
 
     if (context == 3 || context == 4) {
 	fill_gpval_integer("GPVAL_ERRNO", 0);
 	fill_gpval_string("GPVAL_ERRMSG","");
+	fill_gpval_integer("GPVAL_SYSTEM_ERRNO", 0);
+	fill_gpval_string("GPVAL_SYSTEM_ERRMSG","");
     }
 
+    /* GPVAL_PWD is unreliable.  If the current directory becomes invalid,
+     * GPVAL_PWD does not reflect this.  If this matters, the user can
+     * instead do something like    MY_PWD = "`pwd`"
+     */
     if (context == 3 || context == 5) {
-	char *save_file = NULL;
-	save_file = (char *) gp_alloc(PATH_MAX, "filling GPVAL_PWD");
-	if (save_file) {
-	    GP_GETCWD(save_file, PATH_MAX);
-	    fill_gpval_string("GPVAL_PWD", save_file);
-	    free(save_file);
-	}
+	char *save_file = gp_alloc(PATH_MAX, "GPVAL_PWD");
+	int ierror = (GP_GETCWD(save_file, PATH_MAX) == NULL);
+	fill_gpval_string("GPVAL_PWD", ierror ? "" : save_file);
+	free(save_file);
     }
 
     if (context == 6) {
 	fill_gpval_integer("GPVAL_TERM_WINDOWID", current_x11_windowid);
     }
+}
+
+/* System information is stored in GPVAL_BITS GPVAL_MACHINE GPVAL_SYSNAME */
+#ifdef HAVE_UNAME
+# include <sys/utsname.h>
+#elif defined(_WIN32)
+# include <windows.h>
+#endif
+
+void
+fill_gpval_sysinfo()
+{
+/* For linux/posix systems with uname */
+#ifdef HAVE_UNAME
+    struct utsname uts;
+
+    if (uname(&uts) < 0)
+	return;
+    fill_gpval_string("GPVAL_SYSNAME", uts.sysname);
+    fill_gpval_string("GPVAL_MACHINE", uts.machine);
+
+/* For Windows systems */
+#elif defined(_WIN32)
+    SYSTEM_INFO stInfo;
+    OSVERSIONINFO osvi;
+    char s[30];
+
+    ZeroMemory(&osvi, sizeof(OSVERSIONINFO));
+    osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+    GetVersionEx(&osvi);
+    snprintf(s, 30, "Windows_NT-%ld.%ld", osvi.dwMajorVersion, osvi.dwMinorVersion);
+    fill_gpval_string("GPVAL_SYSNAME", s);
+
+    GetSystemInfo(&stInfo);
+    switch (stInfo.wProcessorArchitecture)
+    {
+    case PROCESSOR_ARCHITECTURE_INTEL:
+        fill_gpval_string("GPVAL_MACHINE", "x86");
+        break;
+    case PROCESSOR_ARCHITECTURE_IA64:
+        fill_gpval_string("GPVAL_MACHINE", "ia64");
+       break;
+    case PROCESSOR_ARCHITECTURE_AMD64:
+        fill_gpval_string("GPVAL_MACHINE", "x86_64");
+        break;
+    default:
+        fill_gpval_string("GPVAL_MACHINE", "unknown");
+    }
+#endif
+
+/* For all systems */
+    fill_gpval_integer("GPVAL_BITS", 8 * sizeof(void *));
 }
 
 /* Callable wrapper for the words() internal function */
@@ -1040,26 +1155,3 @@ gp_word(char *string, int i)
     return a.v.string_val;
 }
 
-
-/* Evaluate the function linking secondary axis to primary axis */
-double
-eval_link_function(int axis, double raw_coord)
-{
-    udft_entry *link_udf = axis_array[axis].link_udf;
-    int dummy_var;
-    struct value a;
-
-    if (axis == FIRST_Y_AXIS || axis == SECOND_Y_AXIS)
-	dummy_var = 1;
-    else
-	dummy_var = 0;
-    link_udf->dummy_values[1-dummy_var].type = INVALID_NAME;
-
-    Gcomplex(&link_udf->dummy_values[dummy_var], raw_coord, 0.0);
-    evaluate_at(link_udf->at, &a);
-
-    if (a.type != CMPLX)
-	a = udv_NaN->udv_value;
-
-    return a.v.cmplx_val.real;
-}

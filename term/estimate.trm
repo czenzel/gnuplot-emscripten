@@ -1,8 +1,3 @@
-/* Hello, Emacs, this is -*-C-*-
- * $Id: estimate.trm,v 1.11.2.2 2015/07/08 17:46:55 sfeam Exp $
- *
- */
-
 /* GNUPLOT - estimate.trm */
 
 /*
@@ -185,7 +180,7 @@ ENHest_writec(int c)
 	    ENHest_fragment_width += ENHest_fontsize;
 	    /* [most] characters above 0x3000 are square CJK glyphs, */
 	    /* which are wider than western characters.              */
-	    if ((unsigned int)c >= 0xec)
+	    if ((unsigned char)c >= 0xec)
 		ENHest_fragment_width += ENHest_fontsize;
 	}
     } else

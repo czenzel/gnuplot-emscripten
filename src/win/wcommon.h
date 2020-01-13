@@ -1,5 +1,5 @@
 /*
- * $Id: wcommon.h,v 1.19.2.1 2016/03/22 16:48:33 markisch Exp $
+ * $Id: wcommon.h,v 1.30 2017/01/06 16:07:19 markisch Exp $
  */
 
 /* GNUPLOT - wcommon.h */
@@ -44,6 +44,8 @@
 #ifndef GNUPLOT_WCOMMON_H
 #define GNUPLOT_WCOMMON_H
 
+#include "winmain.h"
+
 #ifndef CLEARTYPE_QUALITY
 #define CLEARTYPE_QUALITY       5
 #endif
@@ -68,46 +70,57 @@ extern UINT cp_output;
 
 /* wgnuplib.c */
 extern HINSTANCE hdllInstance;
-extern LPSTR szParentClass;
-extern LPSTR szTextClass;
-extern LPSTR szPauseClass;
-extern LPSTR szGraphClass;
-extern LPSTR szAboutClass;
+extern LPWSTR szParentClass;
+extern LPWSTR szTextClass;
+extern LPWSTR szToolbarClass;
+extern LPWSTR szSeparatorClass;
+extern LPWSTR szPauseClass;
+extern LPTSTR szGraphClass;
+extern LPTSTR szAboutClass;
 
-void NEAR * LocalAllocPtr(UINT flags, UINT size);
-void NEAR * LocalReAllocPtr(void NEAR * ptr, UINT flags, UINT size);
-void LocalFreePtr(void NEAR *ptr);
-LPSTR GetInt(LPSTR str, LPINT pval);
+void * LocalAllocPtr(UINT flags, UINT size);
+void * LocalReAllocPtr(void * ptr, UINT flags, UINT size);
+void LocalFreePtr(void *ptr);
+LPTSTR GetInt(LPTSTR str, LPINT pval);
 
 /* wtext.c */
+#ifndef WGP_CONSOLE
 void WriteTextIni(LPTW lptw);
 void ReadTextIni(LPTW lptw);
 void DragFunc(LPTW lptw, HDROP hdrop);
 void TextShow(LPTW lptw);
+void TextUpdateStatus(LPTW lptw);
+void TextSuspend(LPTW lptw);
+void TextResume(LPTW lptw);
+void DockedUpdateLayout(LPTW lptw);
+void DockedGraphSize(LPTW lptw, SIZE *size, BOOL newwindow);
 
 /* wmenu.c - Menu */
 void SendMacro(LPTW lptw, UINT m);
 void LoadMacros(LPTW lptw);
 void CloseMacros(LPTW lptw);
+#endif
 
 /* wprinter.c - Printer setup and dump */
-BOOL PrintSize(HDC printer, HWND hwnd, LPRECT lprect);
+extern HGLOBAL hDevNames;
+extern HGLOBAL hDevMode;
+
+void PrintingCleanup(void);
+void * PrintingCallbackCreate(GP_LPPRINT lpr);
+void PrintingCallbackFree(void * callback);
 void PrintRegister(GP_LPPRINT lpr);
 void PrintUnregister(GP_LPPRINT lpr);
 BOOL CALLBACK PrintAbortProc(HDC hdcPrn, int code);
 INT_PTR CALLBACK PrintDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK PrintSizeDlgProc(HWND hdlg, UINT wmsg, WPARAM wparam, LPARAM lparam);
 
 /* wgraph.c */
 unsigned luma_from_color(unsigned red, unsigned green, unsigned blue);
 void add_tooltip(LPGW lpgw, PRECT rect, LPWSTR text);
 void clear_tooltips(LPGW lpgw);
 void draw_update_keybox(LPGW lpgw, unsigned plotno, unsigned x, unsigned y);
-int draw_enhanced_text(LPGW lpgw, HDC hdc, LPRECT rect, int x, int y, const char * str);
+int draw_enhanced_text(LPGW lpgw, LPRECT rect, int x, int y, const char * str);
 void draw_get_enhanced_text_extend(PRECT extend);
-void draw_image(LPGW lpgw, HDC hdc, char *image, POINT corners[4], unsigned int width, unsigned int height, int color_mode);
-void SetFont(LPGW lpgw, HDC hdc);
-void GraphChangeFont(LPGW lpgw, LPCSTR font, int fontsize, HDC hdc, RECT rect);
-LPWSTR UnicodeText(const char *str, enum set_encoding_id encoding);
 
 #ifdef __cplusplus
 }

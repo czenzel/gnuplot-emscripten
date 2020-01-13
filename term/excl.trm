@@ -280,6 +280,7 @@ START_HELP(excl)
 "?terminal excl",
 "?term excl",
 "?excl",
+" Note: legacy terminal. ",
 " The `excl` terminal driver supports Talaris printers such as the EXCL Laser",
 " printer and the 1590.  It has no options."
 END_HELP(excl)

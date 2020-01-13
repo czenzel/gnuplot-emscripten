@@ -100,8 +100,8 @@ subdir = src
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/alpha.m4 \
 	$(top_srcdir)/m4/apple.m4 $(top_srcdir)/m4/beos.m4 \
-	$(top_srcdir)/m4/msdos.m4 $(top_srcdir)/m4/next.m4 \
-	$(top_srcdir)/m4/pkg.m4 $(top_srcdir)/configure.in
+	$(top_srcdir)/m4/msdos.m4 $(top_srcdir)/m4/pkg.m4 \
+	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 mkinstalldirs = $(SHELL) $(top_srcdir)/mkinstalldirs
@@ -124,16 +124,16 @@ am__gnuplot_SOURCES_DIST = alloc.c alloc.h axis.c axis.h breaders.c \
 	getcolor.c getcolor.h gp_hist.h gp_time.h gp_types.h \
 	gplt_x11.h graph3d.c graph3d.h graphics.c graphics.h help.c \
 	help.h hidden3d.c hidden3d.h history.c internal.c internal.h \
-	interpol.c interpol.h libcerf.c libcerf.h matrix.c matrix.h \
-	misc.c misc.h mouse.c mouse.h mousecmn.h multiplot.c \
-	multiplot.h national.h parse.c parse.h plot.c plot.h plot2d.c \
-	plot2d.h plot3d.c plot3d.h pm3d.c pm3d.h readline.c readline.h \
-	save.c save.h scanner.c scanner.h set.c setshow.h show.c \
-	specfun.c specfun.h standard.c standard.h stats.h stats.c \
-	stdfn.c stdfn.h syscfg.h tables.c tables.h tabulate.c \
-	tabulate.h template.h term_api.h term.c term.h time.c unset.c \
-	util.c util.h util3d.c util3d.h variable.c variable.h \
-	version.c version.h wxterminal/wxt_gui.cpp \
+	interpol.c interpol.h jitter.c jitter.h libcerf.c libcerf.h \
+	matrix.c matrix.h misc.c misc.h mouse.c mouse.h mousecmn.h \
+	multiplot.c multiplot.h national.h parse.c parse.h plot.c \
+	plot.h plot2d.c plot2d.h plot3d.c plot3d.h pm3d.c pm3d.h \
+	readline.c readline.h save.c save.h scanner.c scanner.h set.c \
+	setshow.h show.c specfun.c specfun.h standard.c standard.h \
+	stats.h stats.c stdfn.c stdfn.h syscfg.h tables.c tables.h \
+	tabulate.c tabulate.h template.h term_api.h term.c term.h \
+	time.c unset.c util.c util.h util3d.c util3d.h variable.c \
+	variable.h version.c version.h wxterminal/wxt_gui.cpp \
 	wxterminal/gp_cairo.c wxterminal/gp_cairo_helpers.c bitmap.c \
 	qtterminal/qt_term.cpp
 am__dirstamp = $(am__leading_dot)dirstamp
@@ -149,17 +149,17 @@ am_gnuplot_OBJECTS = alloc.$(OBJEXT) axis.$(OBJEXT) breaders.$(OBJEXT) \
 	fit.$(OBJEXT) gadgets.$(OBJEXT) getcolor.$(OBJEXT) \
 	graph3d.$(OBJEXT) graphics.$(OBJEXT) help.$(OBJEXT) \
 	hidden3d.$(OBJEXT) history.$(OBJEXT) internal.$(OBJEXT) \
-	interpol.$(OBJEXT) libcerf.$(OBJEXT) matrix.$(OBJEXT) \
-	misc.$(OBJEXT) mouse.$(OBJEXT) multiplot.$(OBJEXT) \
-	parse.$(OBJEXT) plot.$(OBJEXT) plot2d.$(OBJEXT) \
-	plot3d.$(OBJEXT) pm3d.$(OBJEXT) readline.$(OBJEXT) \
-	save.$(OBJEXT) scanner.$(OBJEXT) set.$(OBJEXT) show.$(OBJEXT) \
-	specfun.$(OBJEXT) standard.$(OBJEXT) stats.$(OBJEXT) \
-	stdfn.$(OBJEXT) tables.$(OBJEXT) tabulate.$(OBJEXT) \
-	term.$(OBJEXT) time.$(OBJEXT) unset.$(OBJEXT) util.$(OBJEXT) \
-	util3d.$(OBJEXT) variable.$(OBJEXT) version.$(OBJEXT) \
-	$(am__objects_1) $(am__objects_2) $(am__objects_3) \
-	$(am__objects_4)
+	interpol.$(OBJEXT) jitter.$(OBJEXT) libcerf.$(OBJEXT) \
+	matrix.$(OBJEXT) misc.$(OBJEXT) mouse.$(OBJEXT) \
+	multiplot.$(OBJEXT) parse.$(OBJEXT) plot.$(OBJEXT) \
+	plot2d.$(OBJEXT) plot3d.$(OBJEXT) pm3d.$(OBJEXT) \
+	readline.$(OBJEXT) save.$(OBJEXT) scanner.$(OBJEXT) \
+	set.$(OBJEXT) show.$(OBJEXT) specfun.$(OBJEXT) \
+	standard.$(OBJEXT) stats.$(OBJEXT) stdfn.$(OBJEXT) \
+	tables.$(OBJEXT) tabulate.$(OBJEXT) term.$(OBJEXT) \
+	time.$(OBJEXT) unset.$(OBJEXT) util.$(OBJEXT) util3d.$(OBJEXT) \
+	variable.$(OBJEXT) version.$(OBJEXT) $(am__objects_1) \
+	$(am__objects_2) $(am__objects_3) $(am__objects_4)
 gnuplot_OBJECTS = $(am_gnuplot_OBJECTS)
 am__DEPENDENCIES_1 =
 gnuplot_DEPENDENCIES = $(am__DEPENDENCIES_1) $(am__DEPENDENCIES_1) \
@@ -188,15 +188,11 @@ gnuplot_qt_OBJECTS = $(am_gnuplot_qt_OBJECTS) \
 	$(nodist_gnuplot_qt_OBJECTS)
 @BUILD_QT_TRUE@gnuplot_qt_DEPENDENCIES = $(am__DEPENDENCIES_1)
 am__gnuplot_x11_SOURCES_DIST = gplt_x11.c gplt_x11.h gpexecute.c \
-	getcolor.c getcolor.h gpexecute.h mousecmn.h version.c \
-	version.h
-@BUILD_GNUPLOT_X11_TRUE@am_gnuplot_x11_OBJECTS =  \
-@BUILD_GNUPLOT_X11_TRUE@	gnuplot_x11-gplt_x11.$(OBJEXT) \
-@BUILD_GNUPLOT_X11_TRUE@	gnuplot_x11-gpexecute.$(OBJEXT) \
-@BUILD_GNUPLOT_X11_TRUE@	gnuplot_x11-getcolor.$(OBJEXT) \
-@BUILD_GNUPLOT_X11_TRUE@	gnuplot_x11-version.$(OBJEXT)
+	gpexecute.h mousecmn.h version.c version.h
+@BUILD_GNUPLOT_X11_TRUE@am_gnuplot_x11_OBJECTS = gplt_x11.$(OBJEXT) \
+@BUILD_GNUPLOT_X11_TRUE@	gpexecute.$(OBJEXT) version.$(OBJEXT)
 gnuplot_x11_OBJECTS = $(am_gnuplot_x11_OBJECTS)
-@BUILD_GNUPLOT_X11_TRUE@gnuplot_x11_DEPENDENCIES =  \
+@BUILD_GNUPLOT_X11_TRUE@gnuplot_x11_DEPENDENCIES = getcolor_x11.o \
 @BUILD_GNUPLOT_X11_TRUE@	$(am__DEPENDENCIES_1)
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
@@ -214,10 +210,6 @@ DEFAULT_INCLUDES = -I.@am__isrc@ -I$(top_builddir)
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__depfiles_maybe = depfiles
 am__mv = mv -f
-AM_V_lt = $(am__v_lt_@AM_V@)
-am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
-am__v_lt_0 = --silent
-am__v_lt_1 = 
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
 AM_V_CC = $(am__v_CC_@AM_V@)
@@ -406,6 +398,7 @@ LINUXSUID = @LINUXSUID@
 LN_S = @LN_S@
 LRELEASE = @LRELEASE@
 LTLIBOBJS = @LTLIBOBJS@
+LUA = @LUA@
 LUA_CFLAGS = @LUA_CFLAGS@
 LUA_LIBS = @LUA_LIBS@
 MAINT = @MAINT@
@@ -423,11 +416,9 @@ PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
 PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
-PANGO_1_10_2_CFLAGS = @PANGO_1_10_2_CFLAGS@
-PANGO_1_10_2_LIBS = @PANGO_1_10_2_LIBS@
+PATCHLEVEL = @PATCHLEVEL@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 PDFLATEX = @PDFLATEX@
-PDFLIB_CONFIG = @PDFLIB_CONFIG@
 PKG_CONFIG = @PKG_CONFIG@
 PLAINTEX = @PLAINTEX@
 QT_CFLAGS = @QT_CFLAGS@
@@ -547,28 +538,27 @@ gnuplot_SOURCES = alloc.c alloc.h axis.c axis.h breaders.c breaders.h \
 	getcolor.c getcolor.h gp_hist.h gp_time.h gp_types.h \
 	gplt_x11.h graph3d.c graph3d.h graphics.c graphics.h help.c \
 	help.h hidden3d.c hidden3d.h history.c internal.c internal.h \
-	interpol.c interpol.h libcerf.c libcerf.h matrix.c matrix.h \
-	misc.c misc.h mouse.c mouse.h mousecmn.h multiplot.c \
-	multiplot.h national.h parse.c parse.h plot.c plot.h plot2d.c \
-	plot2d.h plot3d.c plot3d.h pm3d.c pm3d.h readline.c readline.h \
-	save.c save.h scanner.c scanner.h set.c setshow.h show.c \
-	specfun.c specfun.h standard.c standard.h stats.h stats.c \
-	stdfn.c stdfn.h syscfg.h tables.c tables.h tabulate.c \
-	tabulate.h template.h term_api.h term.c term.h time.c unset.c \
-	util.c util.h util3d.c util3d.h variable.c variable.h \
-	version.c version.h $(am__append_2) $(am__append_3) \
+	interpol.c interpol.h jitter.c jitter.h libcerf.c libcerf.h \
+	matrix.c matrix.h misc.c misc.h mouse.c mouse.h mousecmn.h \
+	multiplot.c multiplot.h national.h parse.c parse.h plot.c \
+	plot.h plot2d.c plot2d.h plot3d.c plot3d.h pm3d.c pm3d.h \
+	readline.c readline.h save.c save.h scanner.c scanner.h set.c \
+	setshow.h show.c specfun.c specfun.h standard.c standard.h \
+	stats.h stats.c stdfn.c stdfn.h syscfg.h tables.c tables.h \
+	tabulate.c tabulate.h template.h term_api.h term.c term.h \
+	time.c unset.c util.c util.h util3d.c util3d.h variable.c \
+	variable.h version.c version.h $(am__append_2) $(am__append_3) \
 	$(am__append_4) $(am__append_7)
 gnuplot_LDADD = $(TERMLIBS) $(TERMXLIBS) $(WX_LIBS) $(QT_LIBS)
-@BUILD_GNUPLOT_X11_TRUE@gnuplot_x11_SOURCES = gplt_x11.c gplt_x11.h gpexecute.c getcolor.c getcolor.h gpexecute.h mousecmn.h version.c version.h
-@BUILD_GNUPLOT_X11_TRUE@gnuplot_x11_CPPFLAGS = -DGPLT_X11_MODE $(AM_CPPFLAGS)
+@BUILD_GNUPLOT_X11_TRUE@gnuplot_x11_SOURCES = gplt_x11.c gplt_x11.h gpexecute.c gpexecute.h mousecmn.h version.c version.h
 @BUILD_GNUPLOT_X11_TRUE@XLIBS = @LIBRARIES_FOR_X@
-@BUILD_GNUPLOT_X11_TRUE@gnuplot_x11_LDADD = $(XLIBS)
+@BUILD_GNUPLOT_X11_TRUE@gnuplot_x11_LDADD = getcolor_x11.o $(XLIBS)
 bf_test_SOURCES = bf_test.c
 bf_test_LIBS = -lm
 @BUILD_SRC_BEOS_SUBDIR_TRUE@d_beos = beos
 SUBDIRS = $(d_beos) wxterminal qtterminal
 EXTRA_gnuplot_SOURCES = strftime.c vms.c
-EXTRA_DIST = GNUmakefile Makefile.maint NeXT OpenStep \
+EXTRA_DIST = GNUmakefile Makefile.maint \
 genopt.com gnuplot.opt x11.opt linkopt.vms \
 makefile.all makefile.awc os2 win \
 $(EXTRA_gnuplot_SOURCES)
@@ -596,12 +586,13 @@ BUILT_SOURCES = timestamp.h
 @BUILD_QT_TRUE@gnuplot_qt_LDADD = $(QT_LIBS)
 
 # embed example (uncomment to build it)
-
+#
 # bin_PROGRAMS += embed_example
 # 
-# nodist_embed_example_SOURCES = moc_embed_example.cpp moc_QtGnuplotInstance.cpp \
-#                          moc_QtGnuplotWidget.cpp moc_QtGnuplotScene.cpp \
-#                          moc_QtGnuplotEvent.cpp qrc_QtGnuplotResource.cpp
+# nodist_embed_example_SOURCES = qtterminal/moc_embed_example.cpp \
+#         qtterminal/moc_QtGnuplotInstance.cpp \
+#         qtterminal/moc_QtGnuplotWidget.cpp qtterminal/moc_QtGnuplotScene.cpp \
+#         qtterminal/moc_QtGnuplotEvent.cpp qtterminal/qrc_QtGnuplotResource.cpp
 # 
 # embed_example_SOURCES = qtterminal/embed_example.cpp \
 # qtterminal/QtGnuplotWidget.cpp qtterminal/QtGnuplotEvent.cpp \
@@ -616,7 +607,7 @@ T = $(top_srcdir)/term/
 COREOBJS = eval.$(O) getcolor.$(O) stats.$(O) unset.$(O) breaders.$(O) \
 specfun.$(O) term.$(O) graph3d.$(O) dynarray.$(O) show.$(O) axis.$(O) \
 stdfn.$(O) util.$(O) save.$(O) util3d.$(O) tabulate.$(O) readline.$(O) \
-internal.$(O) libcerf.$(O) bitmap.$(O) hidden3d.$(O) plot3d.$(O) \
+internal.$(O) jitter.$(O) libcerf.$(O) bitmap.$(O) hidden3d.$(O) plot3d.$(O) \
 color.$(O) contour.$(O) command.$(O) multiplot.$(O) plot.$(O) scanner.$(O) \
 gadgets.$(O) plot2d.$(O) tables.$(O) time.$(O) pm3d.$(O) matrix.$(O) \
 boundary.$(O) fit.$(O) misc.$(O) alloc.$(O) external.$(O) help.$(O) \
@@ -632,10 +623,10 @@ $(T)eepic.trm $(T)emf.trm $(T)emxvga.trm $(T)epson.trm $(T)estimate.trm \
 $(T)excl.trm $(T)fig.trm $(T)gd.trm $(T)ggi.trm $(T)gpic.trm $(T)grass.trm \
 $(T)hp2648.trm $(T)hp26.trm $(T)hp500c.trm $(T)hpgl.trm $(T)hpljii.trm \
 $(T)hppj.trm $(T)imagen.trm $(T)kyo.trm $(T)latex.trm $(T)linux.trm \
-$(T)lua.trm $(T)metafont.trm $(T)metapost.trm $(T)mif.trm $(T)next.trm \
-$(T)openstep.trm $(T)pbm.trm $(T)pc.trm $(T)pdf.trm $(T)pm.trm \
+$(T)lua.trm $(T)metafont.trm $(T)metapost.trm $(T)mif.trm \
+$(T)pbm.trm $(T)pc.trm $(T)pdf.trm $(T)pm.trm \
 $(T)post.trm $(T)pslatex.trm $(T)pstricks.trm $(T)qms.trm $(T)qt.trm \
-$(T)regis.trm $(T)sun.trm $(T)svg.trm $(T)t410x.trm $(T)tek.trm \
+$(T)regis.trm $(T)svg.trm $(T)t410x.trm $(T)tek.trm \
 $(T)texdraw.trm $(T)tgif.trm $(T)tkcanvas.trm $(T)tpic.trm \
 $(T)vgagl.trm $(T)vws.trm $(T)win.trm $(T)wxt.trm $(T)x11.trm $(T)xlib.trm
 
@@ -848,10 +839,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/fit.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/gadgets.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/getcolor.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/gnuplot_x11-getcolor.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/gnuplot_x11-gpexecute.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/gnuplot_x11-gplt_x11.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/gnuplot_x11-version.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/gpexecute.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/gplt_x11.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/graph3d.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/graphics.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/help.Po@am__quote@
@@ -859,6 +848,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/history.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/internal.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/interpol.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/jitter.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libcerf.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/matrix.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/misc.Po@am__quote@
@@ -922,62 +912,6 @@ distclean-compile:
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$<' object='$@' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(COMPILE) -c -o $@ `$(CYGPATH_W) '$<'`
-
-gnuplot_x11-gplt_x11.o: gplt_x11.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT gnuplot_x11-gplt_x11.o -MD -MP -MF $(DEPDIR)/gnuplot_x11-gplt_x11.Tpo -c -o gnuplot_x11-gplt_x11.o `test -f 'gplt_x11.c' || echo '$(srcdir)/'`gplt_x11.c
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/gnuplot_x11-gplt_x11.Tpo $(DEPDIR)/gnuplot_x11-gplt_x11.Po
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='gplt_x11.c' object='gnuplot_x11-gplt_x11.o' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o gnuplot_x11-gplt_x11.o `test -f 'gplt_x11.c' || echo '$(srcdir)/'`gplt_x11.c
-
-gnuplot_x11-gplt_x11.obj: gplt_x11.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT gnuplot_x11-gplt_x11.obj -MD -MP -MF $(DEPDIR)/gnuplot_x11-gplt_x11.Tpo -c -o gnuplot_x11-gplt_x11.obj `if test -f 'gplt_x11.c'; then $(CYGPATH_W) 'gplt_x11.c'; else $(CYGPATH_W) '$(srcdir)/gplt_x11.c'; fi`
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/gnuplot_x11-gplt_x11.Tpo $(DEPDIR)/gnuplot_x11-gplt_x11.Po
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='gplt_x11.c' object='gnuplot_x11-gplt_x11.obj' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o gnuplot_x11-gplt_x11.obj `if test -f 'gplt_x11.c'; then $(CYGPATH_W) 'gplt_x11.c'; else $(CYGPATH_W) '$(srcdir)/gplt_x11.c'; fi`
-
-gnuplot_x11-gpexecute.o: gpexecute.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT gnuplot_x11-gpexecute.o -MD -MP -MF $(DEPDIR)/gnuplot_x11-gpexecute.Tpo -c -o gnuplot_x11-gpexecute.o `test -f 'gpexecute.c' || echo '$(srcdir)/'`gpexecute.c
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/gnuplot_x11-gpexecute.Tpo $(DEPDIR)/gnuplot_x11-gpexecute.Po
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='gpexecute.c' object='gnuplot_x11-gpexecute.o' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o gnuplot_x11-gpexecute.o `test -f 'gpexecute.c' || echo '$(srcdir)/'`gpexecute.c
-
-gnuplot_x11-gpexecute.obj: gpexecute.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT gnuplot_x11-gpexecute.obj -MD -MP -MF $(DEPDIR)/gnuplot_x11-gpexecute.Tpo -c -o gnuplot_x11-gpexecute.obj `if test -f 'gpexecute.c'; then $(CYGPATH_W) 'gpexecute.c'; else $(CYGPATH_W) '$(srcdir)/gpexecute.c'; fi`
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/gnuplot_x11-gpexecute.Tpo $(DEPDIR)/gnuplot_x11-gpexecute.Po
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='gpexecute.c' object='gnuplot_x11-gpexecute.obj' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o gnuplot_x11-gpexecute.obj `if test -f 'gpexecute.c'; then $(CYGPATH_W) 'gpexecute.c'; else $(CYGPATH_W) '$(srcdir)/gpexecute.c'; fi`
-
-gnuplot_x11-getcolor.o: getcolor.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT gnuplot_x11-getcolor.o -MD -MP -MF $(DEPDIR)/gnuplot_x11-getcolor.Tpo -c -o gnuplot_x11-getcolor.o `test -f 'getcolor.c' || echo '$(srcdir)/'`getcolor.c
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/gnuplot_x11-getcolor.Tpo $(DEPDIR)/gnuplot_x11-getcolor.Po
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='getcolor.c' object='gnuplot_x11-getcolor.o' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o gnuplot_x11-getcolor.o `test -f 'getcolor.c' || echo '$(srcdir)/'`getcolor.c
-
-gnuplot_x11-getcolor.obj: getcolor.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT gnuplot_x11-getcolor.obj -MD -MP -MF $(DEPDIR)/gnuplot_x11-getcolor.Tpo -c -o gnuplot_x11-getcolor.obj `if test -f 'getcolor.c'; then $(CYGPATH_W) 'getcolor.c'; else $(CYGPATH_W) '$(srcdir)/getcolor.c'; fi`
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/gnuplot_x11-getcolor.Tpo $(DEPDIR)/gnuplot_x11-getcolor.Po
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='getcolor.c' object='gnuplot_x11-getcolor.obj' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o gnuplot_x11-getcolor.obj `if test -f 'getcolor.c'; then $(CYGPATH_W) 'getcolor.c'; else $(CYGPATH_W) '$(srcdir)/getcolor.c'; fi`
-
-gnuplot_x11-version.o: version.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT gnuplot_x11-version.o -MD -MP -MF $(DEPDIR)/gnuplot_x11-version.Tpo -c -o gnuplot_x11-version.o `test -f 'version.c' || echo '$(srcdir)/'`version.c
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/gnuplot_x11-version.Tpo $(DEPDIR)/gnuplot_x11-version.Po
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='version.c' object='gnuplot_x11-version.o' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o gnuplot_x11-version.o `test -f 'version.c' || echo '$(srcdir)/'`version.c
-
-gnuplot_x11-version.obj: version.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT gnuplot_x11-version.obj -MD -MP -MF $(DEPDIR)/gnuplot_x11-version.Tpo -c -o gnuplot_x11-version.obj `if test -f 'version.c'; then $(CYGPATH_W) 'version.c'; else $(CYGPATH_W) '$(srcdir)/version.c'; fi`
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/gnuplot_x11-version.Tpo $(DEPDIR)/gnuplot_x11-version.Po
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='version.c' object='gnuplot_x11-version.obj' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(gnuplot_x11_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o gnuplot_x11-version.obj `if test -f 'version.c'; then $(CYGPATH_W) 'version.c'; else $(CYGPATH_W) '$(srcdir)/version.c'; fi`
 
 .cpp.o:
 @am__fastdepCXX_TRUE@	$(AM_V_CXX)depbase=`echo $@ | sed 's|[^/]*$$|$(DEPDIR)/&|;s|\.o$$||'`;\
@@ -1309,6 +1243,9 @@ uninstall-am: uninstall-binPROGRAMS uninstall-pkglibexecPROGRAMS \
 	uninstall-pkglibexecPROGRAMS uninstall-qtgnuplotDATA
 
 binonly: $(bin_PROGRAMS)
+
+getcolor_x11.o: getcolor.c
+	$(AM_V_CC)$(COMPILE) -c -DGPLT_X11_MODE -o getcolor_x11.o $(srcdir)/getcolor.c
 timestamp.h: $(top_srcdir)/ChangeLog Makefile
 	@echo Making $@
 	@echo "#ifndef GNUPLOT_TIMEBASE_H_INCLUDED" >$@t

@@ -1,5 +1,5 @@
 # Hello, emacs: this is a -*- Makefile -*-
-# $Id: Makefile,v 1.13 2014/08/18 03:49:06 sfeam Exp $
+# $Id: Makefile,v 1.17.2.2 2017/08/29 13:18:34 markisch Exp $
 #
 # GNUPLOT Makefile OpenWatcom 1.3 on Win32
 
@@ -33,6 +33,7 @@ HHC = "$(HHC_DIR)\hhc.exe"
 # OpenWatcom programs:
 WCL = wcl386
 WCC = wcc386
+WPP = wpp386
 WLD = wlink
 WRC = wrc
 
@@ -56,6 +57,12 @@ GNUPLOT_PS_DIR = share/PostScript
 # paths for external libs added here... 
 LDLIBS = 
 
+# Optional libraries:
+# GDI+ and Direct2D/DirectWrite support libraries are available at
+#   https://sourceforge.net/p/gnuplot/patches/746/
+#GDIPLUS=1
+#DIRECT2D=1
+
 # Macros for makefile.all
 O=obj
 T=$(TOP)\term\
@@ -71,27 +78,41 @@ BINARYFILES=$(M)binary1 $(M)binary2 $(M)binary3
 # Defines
 
 CPPFLAGS =  -DHAVE_CONFIG_H -D_Windows -DHAVE_CONFIG_H -DUSE_MOUSE -DEAM_OBJECTS
+CPPFLAGS += -DVERSION_MAJOR="5.2" -DPATCHLEVEL="0"
+CPPFLAGS += -DUNICODE -D_UNICODE
 # library-dependent ones may have to be added, like:
-# -DHAVE_LIBPNG -DHAVE_LIBPDF 
+# -DHAVE_LIBPNG -DHAVE_LIBPDF
+!ifdef GDIPLUS
+CPPFLAGS += -DHAVE_GDIPLUS
+!endif
+!ifdef DIRECT2D
+CPPFLAGS += -DHAVE_D2D
+!endif
 
 HELPFILE = wgnuplot.chm
 
 DEFAULT_TARGETS = $(BINARYFILES) $(HELPFILE)
 
 TARGETS_PLAIN=wgnuplot.exe wgnuplot.mnu
-EXTRA_CPPFLAGS_PLAIN = 
+EXTRA_CPPFLAGS_PLAIN = -DUSE_FAKEPIPES
 
 TARGETS_PIPES=wgnuplot_pipes.exe wgnuplot.mnu
-EXTRA_CPPFLAGS_PIPES = -DPIPES=1
+EXTRA_CPPFLAGS_PIPES = 
 
 TARGETS_CONSOLE=gnuplot.exe
-EXTRA_CPPFLAGS_CONSOLE = -DPIPES=1 -DWGP_CONSOLE
+EXTRA_CPPFLAGS_CONSOLE = -DWGP_CONSOLE
 
 ALL_TARGETS = $(DEFAULT_TARGETS) $(TARGETS_PLAIN) $(TARGETS_PIPES) $(TARGETS_CONSOLE)
 
 DEFAULT_TARGETS += $(TARGETS_$(VARIANT))
 
 LDLIBS += LIBRARY htmlhelp.lib
+!ifdef GDIPLUS
+LDLIBS += LIBRARY gdiplus.lib
+!endif
+!ifdef DIRECT2D
+LDLIBS += LIBRARY d2d1.lib LIBRARY dwrite.lib
+!endif
 
 # compiler flags, determined from MS ones by OW's "cl /showwopts"
 
@@ -112,7 +133,8 @@ LDLIBS += LIBRARY htmlhelp.lib
 # -j  : char is signed
 # -aa : allow non-const initializers for locals
 # -d2 : debug information
-WCFLAGS = -zlf -ei -zq -I$(S);$(W) -zm -bm -5r -sg -orilt -j -aa -d2 $(CPPFLAGS) $(OPTS)
+WCFLAGS = -zlf -ei -zq -I$(S);$(W) -zm -bm -5r -sg -orilt -aa -d2 $(CPPFLAGS) $(OPTS)
+WPPFLAGS = -zlf -ei -zq -I$(S);$(W) -zm -bm -5r -sg -orilt -d2 $(CPPFLAGS) $(OPTS)
 # removed: -za99
 
 # ...and here.
@@ -128,7 +150,13 @@ default: $(DEFAULT_TARGETS) .SYMBOLIC
 all: $(ALL_TARGETS) .SYMBOLIC
 
 WINOBJS = winmain.$(O) wgnuplib.$(O) wgraph.$(O) wprinter.$(O) wtext.$(O) &
-        wpause.$(O) wmenu.$(O) gpexecute.$(O) screenbuf.$(O)
+          wpause.$(O) wmenu.$(O) gpexecute.$(O) screenbuf.$(O)
+!ifdef GDIPLUS
+WINOBJS = $(WINOBJS) wgdiplus.$(O)
+!endif
+!ifdef DIRECT2D
+WINOBJS = $(WINOBJS) wd2d.$(O)
+!endif
 
 OBJS = $(COREOBJS) version.$(O) $(WINOBJS)
 
@@ -145,16 +173,26 @@ WIN_EXTRA_INPUTS = wgnuplot.res
 .EXTENSIONS: .exe .cobj .pobj .obj .asm .pas .c .cpp .for
 
 .c: $(S);$(W)
+.cpp: $(S);$(W)
 
 # default rule
 .c.obj: .AUTODEPEND
-        $(WCC) $(WCFLAGS) $[@
+	$(WCC) $(EXTRA_CPPFLAGS_PLAIN) $(WCFLAGS) $[@
 
 .c.cobj: .AUTODEPEND
-		$(WCC) $(EXTRA_CPPFLAGS_CONSOLE) $(WCFLAGS) $[@ -fo=$^@
+	$(WCC) $(EXTRA_CPPFLAGS_CONSOLE) $(WCFLAGS) $[@ -fo=$^@
 
 .c.pobj: .AUTODEPEND
-		$(WCC) $(EXTRA_CPPFLAGS_PIPES) $(WCFLAGS) $[@ -fo=$^@
+	$(WCC) $(EXTRA_CPPFLAGS_PIPES) $(WCFLAGS) $[@ -fo=$^@
+
+.cpp.obj: .AUTODEPEND
+	$(WPP) $(EXTRA_CPPFLAGS_PLAIN) $(WPPFLAGS) $[@
+
+.cpp.cobj: .AUTODEPEND
+	$(WPP) $(EXTRA_CPPFLAGS_CONSOLE) $(WPPFLAGS) $[@ -fo=$^@
+
+.cpp.pobj: .AUTODEPEND
+	$(WPP) $(EXTRA_CPPFLAGS_PIPES) $(WPPFLAGS) $[@ -fo=$^@
 
 # file-specific rules
 wgnuplot.exe: $(OBJS) $(WIN_EXTRA_INPUTS)
@@ -169,6 +207,7 @@ FILE {
 LIBRARY kernel32.lib,user32.lib,gdi32.lib,winspool.lib,comdlg32.lib
 LIBRARY comctl32.lib,advapi32.lib,shell32.lib
 LIBRARY msimg32.lib
+LIBRARY shlwapi.lib
 OPTION map
 OPTION SYMFILE
 NAME $^&
@@ -191,6 +230,7 @@ FILE {
 LIBRARY kernel32.lib,user32.lib,gdi32.lib,winspool.lib,comdlg32.lib
 LIBRARY advapi32.lib,shell32.lib
 LIBRARY msimg32.lib
+LIBRARY shlwapi.lib
 OPTION map
 OPTION SYMFILE
 NAME $^&
@@ -213,6 +253,7 @@ FILE {
 LIBRARY kernel32.lib,user32.lib,gdi32.lib,winspool.lib,comdlg32.lib
 LIBRARY advapi32.lib,shell32.lib
 LIBRARY msimg32.lib
+LIBRARY shlwapi.lib
 OPTION map
 OPTION SYMFILE
 NAME gnuplot.exe
@@ -230,7 +271,7 @@ wgnuplot.res :  $(W)\wgnuplot.rc $(W)\wgnuplib.rc &
 	   -d_WIN32 -dNDEBUG -dWIN32 $(W)\wgnuplot.rc
 
 term.obj: $(S)\term.c $(CORETERM) .AUTODEPEND
-        $(WCC) $(WCFLAGS) $(TERMFLAGS) $[@
+        $(WCC) $(EXTRA_CPPFLAGS_PLAIN) $(WCFLAGS) $(TERMFLAGS) $[@
 term.cobj: $(S)\term.c $(CORETERM) .AUTODEPEND
         $(WCC) $(EXTRA_CPPFLAGS_CONSOLE) $(WCFLAGS) $(TERMFLAGS) $[@ -fo=$^@
 term.pobj: $(S)\term.c $(CORETERM) .AUTODEPEND

@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: contour.c,v 1.33 2014/04/02 22:43:39 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - contour.c */
 
 /*[
@@ -60,6 +56,8 @@ t_contour_levels_kind contour_levels_kind = LEVELS_AUTO;
 int contour_levels = DEFAULT_CONTOUR_LEVELS;
 int contour_order = DEFAULT_CONTOUR_ORDER;
 int contour_pts = DEFAULT_NUM_APPROX_PTS;
+int contour_firstlinetype = -1;
+TBOOLEAN contour_sortlevels = FALSE;
 
 /* storage for z levels to draw contours at */
 dynarray dyn_contour_levels_list;
@@ -191,6 +189,20 @@ static void eval_bspline __PROTO((double t, cntr_struct *p_cntr,
 static double fetch_knot __PROTO((TBOOLEAN contr_isclosed, int num_of_points,
 				  int order, int i));
 
+static int
+reverse_sort(SORTFUNC_ARGS arg1, SORTFUNC_ARGS arg2)
+{
+    double const *p1 = arg2;
+    double const *p2 = arg1;
+
+    if (*p1 > *p2)
+	return 1;
+    if (*p1 < *p2)
+	return -1;
+    return 0;
+}
+
+
 /*
  * Entry routine to this whole set of contouring module.
  */
@@ -199,9 +211,12 @@ contour(int num_isolines, struct iso_curve *iso_lines)
 {
     int i;
     int num_of_z_levels;	/* # Z contour levels. */
+    double *zlist;
     poly_struct *p_polys, *p_poly;
     edge_struct *p_edges, *p_edge;
-    double z = 0, dz = 0;
+    double z = 0;
+    double z0 = 0;
+    double dz = 0;
     struct gnuplot_contours *save_contour_list;
 
     /* HBB FIXME 20050804: The number of contour_levels as set by 'set
@@ -225,6 +240,10 @@ contour(int num_isolines, struct iso_curve *iso_lines)
     crnt_cntr_pt_index = 0;
 
     if (contour_levels_kind == LEVELS_AUTO) {
+	if (nonlinear(&Z_AXIS)) {
+	    z_max = eval_link_function(Z_AXIS.linked_to_primary, z_max);
+	    z_min = eval_link_function(Z_AXIS.linked_to_primary, z_min);
+	}
 	dz = fabs(z_max - z_min);
 	if (dz == 0)
 	    return NULL;	/* empty z range ? */
@@ -232,23 +251,41 @@ contour(int num_isolines, struct iso_curve *iso_lines)
 	 * desired number of contour levels. The "* 2" is historical.
 	 * */
 	dz = quantize_normal_tics(dz, ((int) contour_levels + 1) * 2);
-	z = floor(z_min / dz) * dz;
-	num_of_z_levels = (int) floor((z_max - z) / dz);
+	z0 = floor(z_min / dz) * dz;
+	num_of_z_levels = (int) floor((z_max - z0) / dz);
+	if (num_of_z_levels <= 0)
+	    return NULL;
     }
+
+    /* Build a list of contour levels */
+    zlist = gp_alloc(num_of_z_levels * sizeof(double), NULL);
     for (i = 0; i < num_of_z_levels; i++) {
 	switch (contour_levels_kind) {
 	case LEVELS_AUTO:
-	    z += dz;
+	    z = z0 + (i+1) * dz;
 	    z = CheckZero(z,dz);
+	    if (nonlinear(&Z_AXIS))
+		z = eval_link_function((&Z_AXIS), z);
 	    break;
 	case LEVELS_INCREMENTAL:
-	    z = AXIS_LOG_VALUE(FIRST_Z_AXIS, contour_levels_list[0]) +
-		i * AXIS_LOG_VALUE(FIRST_Z_AXIS, contour_levels_list[1]);
+	    if (Z_AXIS.log)
+		z = contour_levels_list[0] * pow(contour_levels_list[1], (double)i);
+	    else
+		z = contour_levels_list[0] + i * contour_levels_list[1];
 	    break;
 	case LEVELS_DISCRETE:
 	    z = AXIS_LOG_VALUE(FIRST_Z_AXIS, contour_levels_list[i]);
 	    break;
 	}
+	zlist[i] = z;
+    }
+    /* Sort the list high-to-low if requested */
+    if (contour_sortlevels)
+	qsort(zlist, num_of_z_levels, sizeof(double), reverse_sort);
+
+    /* Create contour line for each z value in the list */
+    for (i = 0; i < num_of_z_levels; i++) {
+	z = zlist[i];
 	contour_level = z;
 	save_contour_list = contour_list;
 	gen_contours(p_edges, z, x_min, x_max, y_min, y_max);
@@ -262,6 +299,7 @@ contour(int num_isolines, struct iso_curve *iso_lines)
     }
 
     /* Free all contouring related temporary data. */
+    free(zlist);
     while (p_polys) {
 	p_poly = p_polys->next;
 	free(p_polys);
@@ -1459,7 +1497,7 @@ eval_bspline(
 static double
 fetch_knot(TBOOLEAN contr_isclosed, int num_of_points, int order, int i)
 {
-    if(! contr_isclosed) {
+    if (!contr_isclosed) {
 	if (i <= order)
 	    return 0.0;
 	else if (i <= num_of_points)

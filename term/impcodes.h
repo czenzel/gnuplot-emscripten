@@ -1,5 +1,5 @@
 /*
- * $Id: impcodes.h,v 1.2 2013/02/27 00:21:08 sfeam Exp $
+ * $Id: impcodes.h,v 1.1.1.1 1998/04/15 19:16:49 lhecking Exp $
  */
 
 /* This file is used only by imagen.trm */

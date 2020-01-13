@@ -1,5 +1,5 @@
 /*
- * $Id: eval.h,v 1.46.2.1 2016/08/18 17:23:10 sfeam Exp $
+ * $Id: eval.h,v 1.50 2016/08/13 00:16:11 sfeam Exp $
  */
 
 /* GNUPLOT - eval.h */
@@ -56,7 +56,7 @@ enum operators {
     LEFTSHIFT, RIGHTSHIFT, PLUS, MINUS,
     MULT, DIV, MOD, POWER, FACTORIAL, BOOLE,
     DOLLARS,
-    CONCATENATE, EQS, NES, RANGE,
+    CONCATENATE, EQS, NES, RANGE, INDEX, CARDINALITY,
     ASSIGN,
     /* only jump operators go between jump and sf_start, for is_jump() */
     JUMP, JUMPZ, JUMPNZ, JTERN, SF_START,
@@ -87,7 +87,6 @@ typedef struct udft_entry {
 typedef struct udvt_entry {
     struct udvt_entry *next_udv; /* pointer to next value in linked list */
     char *udv_name;		/* name of this value entry */
-    TBOOLEAN udv_undef;		/* true if not defined yet */
     t_value udv_value;		/* value it has */
 } udvt_entry;
 
@@ -151,6 +150,7 @@ struct value * Ginteger __PROTO((struct value *, int));
 struct value * Gstring __PROTO((struct value *, char *));
 struct value * pop_or_convert_from_string __PROTO((struct value *));
 struct value * gpfree_string __PROTO((struct value *a));
+void gpfree_array __PROTO((struct value *a));
 
 void reset_stack __PROTO((void));
 void check_stack __PROTO((void));
@@ -184,9 +184,6 @@ void fill_gpval_complex __PROTO((char *var, double areal, double aimag));
 /* C-callable versions of internal gnuplot functions word() and words() */
 char * gp_word __PROTO((char *string, int i));
 int gp_words __PROTO((char *string));
-
-/* Evaluate the function linking secondary axis to primary axis */
-double eval_link_function __PROTO((int, double));
 
 /* Wrap real_free_at in a macro */
 #define free_at(at_ptr) \

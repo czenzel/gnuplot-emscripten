@@ -9,8 +9,9 @@
 if (strstrt(GPVAL_TERMINALS, " windows ") == 0) {
    fontspec = "Times,12"
 } else {
-   fontspec = "Times New Roman,12"
+   fontspec = "Tahoma,12"
 }
+MANUAL_FIGURES = 1
 
 if (!exists("winhelp")) winhelp = 0
 if (winhelp == 0) {
@@ -20,9 +21,9 @@ if (winhelp == 0) {
 } else {
 #   prefer pngcairo over gd based png
     if (strstrt(GPVAL_TERMINALS, " pngcairo ") > 0) {
-        set term pngcairo font fontspec size 448,225 dashlength 0.2
+        set term pngcairo font fontspec size 448,225 dashlength 0.2 fontscale 0.6
     } else {
-        set term png font fontspec size 448,225 dashlength 0.2
+        set term png font fontspec size 448,225 dashlength 0.2 fontscale 0.6
     }
     out = "./windows/"
 }
@@ -70,7 +71,7 @@ plot demo . 'silver.dat' u 1:($2-10.) title 'with fsteps' with fsteps
 set output out . 'figure_steps' . ext
 set style fill solid 0.25 noborder
 plot demo . 'silver.dat' u 1:($2-10.) title 'with fillsteps' with fillsteps, \
-                      '' u 1:($2-10.) title 'with steps' with steps lw 4
+                      '' u 1:($2-10.) title 'with steps' with steps lw 3 dt solid
 #
 set output out . 'figure_histeps' . ext
 plot demo . 'silver.dat' u 1:($2-10.) title 'with histeps' with histeps
@@ -124,9 +125,9 @@ plot demo . 'candlesticks.dat' using 1:4:3:5 with yerrorbars title 'with yerrorb
 set output out . 'figure_yerrorlines' . ext
 plot demo . 'candlesticks.dat' using 1:4:3:5 with yerrorlines title 'with yerrorlines'
 #
-set output out . 'figure_boxxyerrorbars' . ext
+set output out . 'figure_boxxyerror' . ext
 plot demo . 'candlesticks.dat' using 1:4:($1-sin($1)/2.):($1+sin($1)/2.):3:5 \
-     with boxxyerrorbars title 'with boxxyerrorbars' fs empty
+     with boxxyerror title 'with boxxyerror' fs empty
 #
 set output out . 'figure_xyerrorbars' . ext
 plot demo . 'candlesticks.dat' using 1:4:($1-sin($1)/2.):($1+sin($1)/2.):3:5 \
@@ -143,7 +144,8 @@ plot demo . 'candlesticks.dat' using 1:4:($1-sin($1)/2.):($1+sin($1)/2.) \
 set output out . 'figure_xerrorlines' . ext
 plot demo . 'candlesticks.dat' using 1:4:($1-sin($1)/2.):($1+sin($1)/2.) \
      with xerrorlines title 'with xerrorlines'
-     
+
+# 
 #
 # Boxplot
 # =======
@@ -183,69 +185,6 @@ set yrange [-4:4]
 splot invnorm(rand(0)),invnorm(rand(0)),invnorm(rand(0)) with dots notitle
 
 #
-# Histograms
-# ==========
-#
-reset
-set style data histogram
-set boxwidth 0.9 rel
-set key auto column invert
-set yrange [0:*]
-set offset 0,0,2,0
-unset xtics
-set tmargin 1
-#
-set output out . 'figure_histclust' . ext
-set style histogram clustered
-plot demo . 'histopt.dat' using 1 fs solid 0.5, '' using 2 fs empty
-#
-set output out . 'figure_histerrorbar' . ext
-set title "Histogram with error bars" offset 0,-1
-set style fill solid border -1
-set style histogram errorbars lw 2
-plot demo . 'histerror.dat' using 2:3 fs solid 0.5 ti 'A', '' using 4:5 fs empty ti 'B'
-#
-set output out . 'figure_histrows' . ext
-set style histogram rows
-set title "Rowstacked" offset 0,-1
-plot demo . 'histopt.dat' using 1 fs solid 0.5, '' using 2 fs empty
-#
-set output out . 'figure_newhist' . ext
-set style histogram cluster
-set style data histogram
-unset title
-set key auto column noinvert
-set xtics 1 offset character 0,0.3
-plot newhistogram "Set A", \
-    demo . 'histopt.dat' u 1 t col, '' u 2 t col fs empty, \
-    newhistogram "Set B" at 8, \
-    demo . 'histopt.dat' u 1 t col, '' u 2 t col fs empty
-#
-set output out . 'figure_histcols' . ext
-set style histogram columnstacked
-set title "Columnstacked" offset 0,-1
-set boxwidth 0.8 rel
-set xtics
-
-if (winhelp !=0) {
-# greyscale rgb for png
-set linetype 11 lc rgb "gray0"
-set linetype 12 lc rgb "white"
-set linetype 13 lc rgb "gray40"
-set linetype 14 lc rgb "gray70"
-set style fill solid 1.0 border -1
-
-plot newhistogram lt 11, \
-     'histopt.dat' using 1 title column, \
-     '' using 2 title column
-} else {
-# patterned fill for pdf
-set style fill pattern
-plot 'histopt.dat' using 1 title column, \
-     '' using 2 title column
-}
-
-#
 # Circles
 # =======
 #
@@ -256,8 +195,8 @@ unset key
 set size ratio -1
 set xrange [-2.5:1.5]
 set yrange [-1:2.5]
-set xtics font "Times,10" format "%.1f" scale 0.5
-set ytics font "Times,10" format "%.1f" scale 0.5
+set xtics font ",10" format "%.1f" scale 0.5
+set ytics font ",10" format "%.1f" scale 0.5
 plot demo . 'optimize.dat' with circles lc rgb "gray" fs transparent solid 0.2 nobo,\
      demo . 'optimize.dat' u 1:2 with linespoints lw 2 pt 7 ps 0.3 lc rgb "black"
      
@@ -272,7 +211,7 @@ unset xtics; unset ytics
 plot demo . 'ellipses.dat' u 1:2:3:4:5 with ellipses units xy title "with ellipses",\
      '' u 1:2:3:4:5 with ellipses units xx notitle,\
      '' u 1:2:3:4:5 with ellipses units yy notitle
-     
+
 #
 # 2D heat map from an array of in-line data
 # =========================================
@@ -280,6 +219,12 @@ plot demo . 'ellipses.dat' u 1:2:3:4:5 with ellipses units xy title "with ellips
 reset
 set output out . 'figure_heatmap' . ext
 set title "2D Heat map from in-line array of values" offset 0,-1
+$HEATMAP << EOD
+5 4 3 1 0
+2 2 0 0 1
+0 0 0 1 0
+0 1 2 4 3
+EOD
 unset key
 set bmargin 1
 set tmargin 3
@@ -292,14 +237,7 @@ set yrange  [3.5:-0.5]
 set x2tics 0,1
 set ytics  0,1
 set palette rgbformula -3,-3,-3
-plot '-' matrix with image
-5 4 3 1 0
-2 2 0 0 1
-0 0 0 1 0
-0 1 2 4 3
-e
-e
-
+plot $HEATMAP matrix with image
 #
 # 3D Plot styles
 # ==============
@@ -367,8 +305,8 @@ set yrange [ -10 : 137 ]
 set zrange [  -1 :   1 ]
 set xyplane at -1
 set bmargin at screen 0.25
-set xtics offset 0,0 font "Times,10"
-set ytics offset 0,0 font "Times,10"
+set xtics offset 0,0 font ",10"
+set ytics offset 0,0 font ",10"
 set view 45, 25, 1.0, 1.35
 set grid
 unset key
@@ -419,12 +357,47 @@ set datafile separator "\t"
 plot demo . 'cities.dat' using 5:4:($3 < 5000 ? "-" : CityName(1,3)) with labels
 
 #
+# Following example plots will be set in colour mode for pdf output
+#
+if (GPVAL_TERM eq "pdfcairo") \
+    set term pdfcairo color font fontspec size 3.5,2.0 dashlength 0.2
+
+#
+# Use of `keyentry` to construct a key
+# ====================================
+#
+reset
+set output out . 'figure_keyentry' . ext
+set title "Construct key from custom entries"
+set tics scale 0
+unset xtics
+set xrange  [-0.5:4.5]
+set x2range [-0.5:4.5]
+set yrange  [3.5:-0.5]
+set x2tics 0,1
+set ytics  0,1
+set palette rgbform -7,2,-7
+unset colorbox
+set style fill solid border lc "black"
+set key outside right center reverse Left samplen 1
+set key title "Outcomes" left
+
+plot $HEATMAP matrix with image notitle, \
+    keyentry with boxes fc palette cb 0 title "no effect", \
+    keyentry with boxes fc palette cb 1 title "threshold", \
+    keyentry with boxes fc palette cb 3 title "typical range", \
+    keyentry with labels title "as reported in [12]", \
+    keyentry with boxes fc palette cb 5 title "strong effect"
+
+#
 # Polar plot
 # ==========
 #
 reset
 set output out . 'figure_polar' . ext
 unset border
+set tmargin 2
+set bmargin 2
 set style fill   solid 0.50 border
 set grid polar 0.523599 lt 0 lw 1
 set key title "bounding radius 2.5"
@@ -432,14 +405,39 @@ set key at screen 0.95, screen 0.95
 set key noinvert samplen 0.7
 set polar
 set size ratio 1 1,1
-set noxtics
-set noytics
-set rrange [ 0.100000 : 4.00000 ]
+unset xtics
+unset ytics
+set ttics ("0" 0, "π/2" 90, "π" 180, "3π/2" 270)
+set rrange [ 0.1 : 4.0 ]
 butterfly(x)=exp(cos(x))-2*cos(4*x)+sin(x/12)**5
-GPFUN_butterfly = "butterfly(x)=exp(cos(x))-2*cos(4*x)+sin(x/12)**5"
 plot 3.+sin(t)*cos(5*t) with filledcurve above r=2.5 notitle, \
      3.+sin(t)*cos(5*t) with line
 
+#
+# Vectors
+# =======
+#
+reset
+set output out . 'figure_vectors' . ext
+set label 1 "Vector field {/:Italic F(x,y) = (ky,-kx)}"
+set label 1 at 0.5, 3.0 left
+unset key
+unset clip one
+unset border
+set style arrow 1 head filled size .2, 20. lw 2 lc "slateblue1"
+set samples 5, 5
+set isosamples 5, 5
+set size ratio 1 1
+set xzeroaxis
+set yzeroaxis
+set xtics axis add ("" 0)
+set ytics axis add ("" 0)
+set urange [ -2.0 : 2.0 ]
+set vrange [ -2.0 : 2.0 ]
+
+plot '++' using 1:2:($2*0.4):(-$1*0.4) with vectors as 1
+
+     
 #
 # Missing Datapoints
 # ==================
@@ -518,10 +516,80 @@ unset multiplot
 
 
 #
-# Following example plots will be set in colour mode for pdf output
+# Filledcurves used to represent error on y
 #
-if (GPVAL_TERM eq "pdfcairo") \
-    set term pdfcairo color font fontspec size 3.5,2.0 dashlength 0.2
+reset
+set output out . 'figure_yerrorfill' . ext
+set logscale y
+set ytics  norangelimit logscale autofreq 
+set title "Ag 108 decay data" 
+set xlabel "Time (sec)" 
+set ylabel "Rate" 
+Shadecolor = "#80E0A080"
+plot 'silver.dat' using 1:($2+$3):($2-$3) with filledcurve fc rgb Shadecolor title "Shaded error region", \
+     '' using 1:2 smooth mcspline lw 1.5  title "Monotonic spline through data"     
+#
+# Histograms
+# ==========
+#
+reset
+set style data histogram
+set boxwidth 0.9 rel
+set key auto column invert
+set yrange [0:*]
+set offset 0,0,2,0
+unset xtics
+set tmargin 1
+#
+set output out . 'figure_histclust' . ext
+set style histogram clustered
+plot demo . 'histopt.dat' using 1 fs solid 0.5, '' using 2 fs empty
+#
+set output out . 'figure_histerrorbar' . ext
+set title "Histogram with error bars" offset 0,-1
+set style fill solid border -1
+set style histogram errorbars lw 2
+plot demo . 'histerror.dat' using 2:3 fs solid 0.5 ti 'A', '' using 4:5 fs empty ti 'B'
+#
+set output out . 'figure_histrows' . ext
+set style histogram rows
+set title "Rowstacked" offset 0,-1
+plot demo . 'histopt.dat' using 1 fs solid 0.5, '' using 2 fs empty
+#
+set output out . 'figure_newhist' . ext
+set style histogram cluster
+set style data histogram
+unset title
+set key auto column noinvert
+set xtics 1 offset character 0,0.3
+plot newhistogram "Set A", \
+    demo . 'histopt.dat' u 1 t col, '' u 2 t col fs empty, \
+    newhistogram "Set B" at 8, \
+    demo . 'histopt.dat' u 1 t col, '' u 2 t col fs empty
+#
+set output out . 'figure_histcols' . ext
+set style histogram columnstacked
+set title "Columnstacked" offset 0,-1
+set boxwidth 0.8 rel
+set xtics
+
+if (winhelp !=0) {
+# greyscale rgb for png
+set linetype 11 lc rgb "gray0"
+set linetype 12 lc rgb "white"
+set linetype 13 lc rgb "gray40"
+set linetype 14 lc rgb "gray70"
+set style fill solid 1.0 border -1
+
+plot newhistogram lt 11, \
+     'histopt.dat' using 1 title column, \
+     '' using 2 title column
+} else {
+# patterned fill for pdf
+# set style fill pattern
+plot 'histopt.dat' using 1 title column, \
+     '' using 2 title column
+}
 
 
 #
@@ -556,6 +624,60 @@ plot demo . 'silver.dat' u 1:2:($3+$1/50.) w filledcurves above title 'above' lc
                '' u 1:2:($3+$1/50.) w filledcurves below title 'below' lc rgb "dark-violet", \
                '' u 1:2 w lines lt -1 lw 1 title 'curve 1', \
                '' u 1:($3+$1/50.) w lines lt -1 lw 4 title 'curve 2'
+
+#
+# Bee swarm plots
+#
+reset
+set output out . 'figure_jitter' . ext
+npts = 60
+set print $data
+do for [i=1:npts] {
+    print sprintf("%d %8.5g", (i%5) ? 3 : 4, 25.+10.*invnorm(rand(0)))
+}
+unset print
+set xrange [2.5:4.5]
+set xtics ("A" 3, "B" 4)
+set border 2
+set xtics nomirror scale 0
+set ytics nomirror rangelimited scale 0
+unset key
+
+set multiplot layout 1, 2 
+set jitter over 0.5 spread 1.6 swarm
+set title "swarm (default)"
+plot $data using 1:2:1 with points pt 6 ps 0.8 lc variable
+set jitter over 0.5 spread 1.6 square
+set title "square"
+replot
+unset multiplot
+
+# Custom key placement
+reset
+set output out . 'figure_multiple_keys' . ext
+set xtics font ",6"  offset 0,1
+set label 1 font ",10"
+set key font ",9" spacing 0.5
+load demo . 'custom_key.dem'
+
+# Fence plot
+reset
+set output out . 'figure_fenceplot' . ext
+set title "fence plot constructed with zerrorfill" 
+unset key
+set zrange [-1:1]
+set xtics ( "A" -2, "B" -1, "C" 0, "D" 1, "E" 2 ) scale 0 offset -1
+set xrange [-3:2]
+set xyplane at -1.1
+set yrange [-0.5:0.5]
+set ytics format "  %.1f" scale 0
+set ylabel "Y value"  rotate parallel offset -2
+unset ztics
+set zlabel "Z value" rotate offset 5
+sinc(u,v) = sin(sqrt(u**2+v**2)) / sqrt(u**2+v**2)
+set style fill  solid 0.5 noborder
+splot for [x=-2:2][y=-50:50:3] '+' using (x):($1/100.):(-1):(-1):(sinc($1/10., 1.+2*x)) with zerrorfill
+reset
 
 # close last file
 unset outp

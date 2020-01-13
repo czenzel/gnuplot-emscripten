@@ -1,7 +1,3 @@
-/*
- * $Id: datafile.h,v 1.49.2.2 2016/08/25 04:28:36 sfeam Exp $
- */
-
 /* GNUPLOT - datafile.h */
 
 /*[
@@ -104,6 +100,7 @@ extern struct udft_entry ydata_func; /* deprecated "thru" function */
 
 /* Returned to caller by df_readline() */
 extern char *df_tokens[];
+extern struct value df_strings[];	/* used only by TABLESTYLE */
 
 /* number of columns in first row of data return to user in STATS_columns */
 extern int df_last_col;
@@ -139,6 +136,7 @@ extern char *df_key_title;
 int df_open __PROTO((const char *, int, struct curve_points *));
 int df_readline __PROTO((double [], int));
 void df_close __PROTO((void));
+void df_init __PROTO((void));
 char * df_fgets __PROTO((FILE *));
 void df_showdata __PROTO((void));
 int df_2dbinary __PROTO((struct curve_points *));
@@ -160,6 +158,7 @@ struct use_spec_s {
     int column;
     int expected_type;
     struct at_type *at;
+    int depends_on_column;
 };
 
 
@@ -264,6 +263,12 @@ typedef struct df_binary_file_record_struct {
     double scan_delta[3];             /* sample period along points, lines, planes */
     df_translation_type scan_trans;   /* translate via origin, center or default */
     double scan_cen_or_ori[3];        /* vector representing center or origin, x/y/z */
+
+    /* `matrix every ::lowx:lowy:` can select a submatrix.
+     * This is its size.
+     */
+    int submatrix_ncols;
+    int submatrix_nrows;
 
     /* *** Do not modify outside of datafile.c!!! *** */
     char GPFAR *memory_data;

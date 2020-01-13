@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: misc.c,v 1.188.2.10 2016/08/16 19:35:19 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - misc.c */
 
 /*[
@@ -45,17 +41,23 @@ static char *RCSid() { return RCSid("$Id: misc.c,v 1.188.2.10 2016/08/16 19:35:1
 #include "variable.h"
 #include "axis.h"
 #include "scanner.h"		/* so that scanner() can count curly braces */
-#ifdef _Windows
+#include "setshow.h"
+#ifdef _WIN32
 # include <fcntl.h>
 # if defined(__WATCOMC__) || defined(__MSC__)
 #  include <io.h>        /* for setmode() */
 # endif
 #endif
-#if defined(HAVE_DIRENT_H)
+#if defined(HAVE_DIRENT_H) && !defined(_WIN32)
 # include <sys/types.h>
 # include <dirent.h>
-#elif defined(_Windows)
-# include <windows.h>
+#endif
+#ifdef _WIN32
+/* Windows version of opendir() and friends are in stdfn.c */
+/* Note: OpenWatcom has them in direct.h, but we prefer
+         the built-in variants as they handle encodings.
+*/
+# include "win/winmain.h"
 #endif
 
 static char *recursivefullname __PROTO((const char *path, const char *filename, TBOOLEAN recursive));
@@ -139,10 +141,21 @@ static void
 prepare_call(int calltype)
 {
     struct udvt_entry *udv;
+    struct value *ARGV;
     int argindex;
+    int argv_size;
+
+    /* call_args[] will hold arguments as strings.
+     * argval[] will be a private copy of numeric arguments as udvs.
+     * Later we will fill ARGV[] from one or the other.
+     */
+    struct value argval[9];
+    for (argindex = 0; argindex < 9; argindex++)
+	argval[argindex].type = NOTDEFINED;
+
     if (calltype == 2) {
 	call_argc = 0;
-	while (!END_OF_COMMAND && call_argc <= 9) {
+	while (!END_OF_COMMAND && call_argc < 9) {
 	    call_args[call_argc] = try_to_get_string();
 	    if (!call_args[call_argc]) {
 		int save_token = c_token;
@@ -152,11 +165,15 @@ prepare_call(int calltype)
 		    call_args[call_argc] = gp_strdup(add_udv(c_token)->udv_value.v.string_val);
 		    c_token++;
 
-		/* Evaluates a parenthesized expression and store the result in a string */
-		} else if (equals(c_token, "(")) {
+		/* Evaluate a parenthesized expression or a bare numeric user variable
+		 * and store the result in a string
+		 */
+		} else if (equals(c_token, "(")
+			|| (type_udv(c_token) == INTGR || type_udv(c_token) == CMPLX)) {
 		    char val_as_string[32];
 		    struct value a;
 		    const_express(&a);
+		    argval[call_argc] = a;
 		    switch(a.type) {
 			case CMPLX: /* FIXME: More precision? Some way to provide a format? */
 				sprintf(val_as_string, "%g", a.v.cmplx_val.real);
@@ -171,11 +188,17 @@ prepare_call(int calltype)
 				break;
 		    } 
 
-		/* old (pre version 5) style wrapping of bare tokens as strings */
-		/* is still useful for passing unquoted numbers */
+		/* Old (pre version 5) style wrapping of bare tokens as strings
+		 * is still used for storing numerical constants ARGn but not ARGV[n]
+		 */
 		} else {
+		    double temp;
+		    char *endptr;
 		    m_capture(&call_args[call_argc], c_token, c_token);
 		    c_token++;
+		    temp = strtod(call_args[call_argc], &endptr);
+		    if (endptr != call_args[call_argc] && *endptr == '\0')
+			Gcomplex(&argval[call_argc], temp, 0.0);
 		}
 	    }
 	    call_argc++;
@@ -197,22 +220,40 @@ prepare_call(int calltype)
 	call_argc = 0;
     }
 
-    /* Old-style "call" arguments were referenced as $0 ... $9 and $# */
-    /* New-style has ARG0 = script-name, ARG1 ... ARG9 and ARGC */
-    /* FIXME:  If we defined these on entry, we could use get_udv* here */
+    /* Old-style "call" arguments were referenced as $0 ... $9 and $#.
+     * New-style has ARG0 = script-name, ARG1 ... ARG9 and ARGC
+     * Version 5.2.4 adds ARGV[n]
+     */
     udv = add_udv_by_name("ARGC");
     Ginteger(&(udv->udv_value), call_argc);
-    udv->udv_undef = FALSE;
+
     udv = add_udv_by_name("ARG0");
     gpfree_string(&(udv->udv_value));
     Gstring(&(udv->udv_value), gp_strdup(lf_head->name));
-    udv->udv_undef = FALSE;
+
+    udv = add_udv_by_name("ARGV");
+    gpfree_array(&(udv->udv_value));
+    gpfree_string(&(udv->udv_value));
+
+    argv_size = GPMIN(call_argc, 9);
+    udv->udv_value.type = ARRAY;
+    ARGV = udv->udv_value.v.value_array = gp_alloc((argv_size + 1) * sizeof(t_value), "array state");
+    ARGV[0].v.int_val = argv_size;
+    ARGV[0].type = NOTDEFINED;
+
     for (argindex = 1; argindex <= 9; argindex++) {
-	char *arg = gp_strdup(call_args[argindex-1]);
+	char *argstring = call_args[argindex-1];
+
 	udv = add_udv_by_name(argname[argindex]);
 	gpfree_string(&(udv->udv_value));
-	Gstring(&(udv->udv_value), arg ? arg : gp_strdup(""));
-	udv->udv_undef = FALSE;
+	Gstring(&(udv->udv_value), argstring ? gp_strdup(argstring) : gp_strdup(""));
+
+	if (argindex > argv_size)
+	    continue;
+	if (argval[argindex-1].type == NOTDEFINED)
+	    Gstring(&ARGV[argindex], gp_strdup(udv->udv_value.v.string_val));
+	else
+	    ARGV[argindex] = argval[argindex-1];
     }
 }
 
@@ -276,7 +317,7 @@ expand_call_args(void)
 #endif /* OLD_STYLE_CALL_ARGS */
 
 /*
- * load_file() is called from
+ * calltype indicates whether load_file() is called from
  * (1) the "load" command, no arguments substitution is done
  * (2) the "call" command, arguments are substituted for $0, $1, etc.
  * (3) on program entry to load initialization files (acts like "load")
@@ -291,18 +332,16 @@ load_file(FILE *fp, char *name, int calltype)
     int start, left;
     int more;
     int stop = FALSE;
+    udvt_entry *gpval_lineno = NULL;
+
+    if (fp == (FILE *) NULL)
+	int_error(NO_CARET, "Cannot open script file '%s'", name);
 
     /* Provide a user-visible copy of the current line number in the input file */
-    udvt_entry *gpval_lineno = add_udv_by_name("GPVAL_LINENO");
+    gpval_lineno = add_udv_by_name("GPVAL_LINENO");
     Ginteger(&gpval_lineno->udv_value, 0);
-    gpval_lineno->udv_undef = FALSE;
 
     lf_push(fp, name, NULL); /* save state for errors and recursion */
-
-    if (fp == (FILE *) NULL) {
-	int_error(NO_CARET, "Cannot open script file '%s'", name);
-	return; /* won't actually reach here */
-    }
 
     if (fp == stdin) {
 	/* DBT 10-6-98  go interactive if "-" named as load file */
@@ -335,7 +374,9 @@ load_file(FILE *fp, char *name, int calltype)
 	    } else {
 		inline_num++;
 		gpval_lineno->udv_value.v.int_val = inline_num;	/* User visible copy */
-		len = strlen(gp_input_line) - 1;
+		if ((len = strlen(gp_input_line)) == 0)
+		    continue;
+		--len;
 		if (gp_input_line[len] == '\n') {	/* remove any newline */
 		    gp_input_line[len] = '\0';
 		    /* Look, len was 1-1 = 0 before, take care here! */
@@ -393,6 +434,10 @@ load_file(FILE *fp, char *name, int calltype)
 
 	    }
 	}
+	
+	/* If we hit a 'break' or 'continue' statement in the lines just processed */
+	if (iteration_early_exit())
+	    continue;
 
 	/* process line */
 	if (strlen(gp_input_line) > 0) {
@@ -447,19 +492,34 @@ lf_pop()
 	if ((udv = get_udv_by_name("ARGC"))) {
 	    Ginteger(&(udv->udv_value), call_argc);
 	}
+
 	if ((udv = get_udv_by_name("ARG0"))) {
 	    gpfree_string(&(udv->udv_value));
 	    Gstring(&(udv->udv_value),
 		(lf->prev && lf->prev->name) ? gp_strdup(lf->prev->name) : gp_strdup(""));
 	}
+
 	for (argindex = 1; argindex <= 9; argindex++) {
 	    if ((udv = get_udv_by_name(argname[argindex]))) {
 		gpfree_string(&(udv->udv_value));
-		Gstring(&(udv->udv_value), gp_strdup(call_args[argindex-1]));
 		if (!call_args[argindex-1])
-		    udv->udv_undef = TRUE;
+		    udv->udv_value.type = NOTDEFINED;
+		else
+		    Gstring(&(udv->udv_value), gp_strdup(call_args[argindex-1]));
 	    }
 	}
+
+	if ((udv = get_udv_by_name("ARGV")) && udv->udv_value.type == ARRAY) {
+	    struct value *ARGV;
+	    int argv_size = lf->argv[0].v.int_val;
+
+	    gpfree_array(&(udv->udv_value));
+	    udv->udv_value.type = ARRAY;
+	    ARGV = udv->udv_value.v.value_array = gp_alloc((argv_size + 1) * sizeof(t_value), "array state");
+	    for (argindex = 0; argindex <= argv_size; argindex++)
+		ARGV[argindex] = lf->argv[argindex];
+	}
+
     }
 
     interactive = lf->interactive;
@@ -519,9 +579,22 @@ lf_push(FILE *fp, char *name, char *cmdline)
 
     /* Call arguments are irrelevant if invoked from do_string_and_free */
     if (cmdline == NULL) {
+	struct udvt_entry *udv;
+	/* Save ARG0 through ARG9 */
 	for (argindex = 0; argindex < 10; argindex++) {
 	    lf->call_args[argindex] = call_args[argindex];
 	    call_args[argindex] = NULL;	/* initially no args */
+	}
+	/* Save ARGV[] */
+	lf->argv[0].v.int_val = 0;
+	lf->argv[0].type = NOTDEFINED;
+	if ((udv = get_udv_by_name("ARGV")) && udv->udv_value.type == ARRAY) {
+	    for (argindex = 0; argindex <= call_argc; argindex++) {
+		lf->argv[argindex] = udv->udv_value.v.value_array[argindex];
+		if (lf->argv[argindex].type == STRING)
+		    lf->argv[argindex].v.string_val =
+			gp_strdup(lf->argv[argindex].v.string_val);
+	    }
 	}
     }
     lf->depth = lf_head ? lf_head->depth+1 : 0;	/* recursion depth */
@@ -593,20 +666,17 @@ loadpath_fopen(const char *filename, const char *mode)
 
 	if (fullname)
 	    free(fullname);
-
     }
 
-#ifdef _Windows
+#ifdef _WIN32
     if (fp != NULL)
-	setmode(fileno(fp), _O_BINARY);
+	_setmode(_fileno(fp), _O_BINARY);
 #endif
     return fp;
 }
 
 
 /* Harald Harders <h.harders@tu-bs.de> */
-/* Thanks to John Bollinger <jab@bollingerbands.com> who has tested the
-   windows part */
 static char *
 recursivefullname(const char *path, const char *filename, TBOOLEAN recursive)
 {
@@ -628,7 +698,7 @@ recursivefullname(const char *path, const char *filename, TBOOLEAN recursive)
     }
 
     if (recursive) {
-#ifdef HAVE_DIRENT_H
+#if defined HAVE_DIRENT_H || defined(_WIN32)
 	DIR *dir;
 	struct dirent *direntry;
 	struct stat buf;
@@ -636,7 +706,7 @@ recursivefullname(const char *path, const char *filename, TBOOLEAN recursive)
 	dir = opendir(path);
 	if (dir) {
 	    while ((direntry = readdir(dir)) != NULL) {
-		char *fulldir = gp_alloc(strlen(path) + 1 + strlen(direntry->d_name) + 1,
+		char *fulldir = (char *) gp_alloc(strlen(path) + 1 + strlen(direntry->d_name) + 1,
 					 "fontpath_fullname");
 		strcpy(fulldir, path);
 #  if defined(VMS)
@@ -660,34 +730,6 @@ recursivefullname(const char *path, const char *filename, TBOOLEAN recursive)
 	    }
 	    closedir(dir);
 	}
-#elif defined(_Windows)
-	HANDLE filehandle;
-	WIN32_FIND_DATA finddata;
-	char *pathwildcard = gp_alloc(strlen(path) + 2, "fontpath_fullname");
-
-	strcpy(pathwildcard, path);
-	PATH_CONCAT(pathwildcard, "*");
-
-	filehandle = FindFirstFile(pathwildcard, &finddata);
-	free(pathwildcard);
-	if (filehandle != INVALID_HANDLE_VALUE)
-	    do {
-		if ((finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-		    (strcmp(finddata.cFileName, ".") != 0) &&
-		    (strcmp(finddata.cFileName, "..") != 0)) {
-		    char *fulldir = gp_alloc(strlen(path) + 1 + strlen(finddata.cFileName) + 1,
-					     "fontpath_fullname");
-		    strcpy(fulldir, path);
-		    PATH_CONCAT(fulldir, finddata.cFileName);
-
-		    fullname = recursivefullname(fulldir, filename, TRUE);
-		    free(fulldir);
-		    if (fullname != NULL)
-			break;
-		}
-	    } while (FindNextFile(filehandle, &finddata) != 0);
-	FindClose(filehandle);
-
 #else
 	int_warn(NO_CARET, "Recursive directory search not supported\n\t('%s!')", path);
 #endif
@@ -727,7 +769,6 @@ fontpath_fullname(const char *filename)
 	    }
 	    free(path);
 	}
-
     } else
 	fullname = gp_strdup(filename);
 
@@ -894,7 +935,7 @@ need_fill_border(struct fill_style_type *fillstyle)
 
     /* Wants a border in a new color */
     if (p.pm3d_color.type != TC_DEFAULT)
-	apply_pm3dcolor(&p.pm3d_color,term);
+	apply_pm3dcolor(&p.pm3d_color);
     
     return TRUE;
 }
@@ -1003,6 +1044,7 @@ lp_parse(struct lp_style_type *lp, lp_class destination_class, TBOOLEAN allow_po
     /* keep track of which options were set during this call */
     int set_lt = 0, set_pal = 0, set_lw = 0; 
     int set_pt = 0, set_ps  = 0, set_pi = 0;
+    int set_pn = 0;
     int set_dt = 0;
     int new_lt = 0;
 
@@ -1163,13 +1205,16 @@ lp_parse(struct lp_style_type *lp, lp_class destination_class, TBOOLEAN allow_po
 		    /* An alternative mechanism would be to use
 		     * utf8toulong(&newlp.p_char, symbol);
 		     */
-		    strncpy((char *)(&newlp.p_char), symbol, 3);
+		    strncpy(newlp.p_char, symbol, sizeof(newlp.p_char)-1);
 		    /* Truncate ascii text to single character */
-		    if ((((char *)&newlp.p_char)[0] & 0x80) == 0)
-			((char *)&newlp.p_char)[1] = '\0';
-		    /* UTF-8 characters may use up to 3 bytes */
-		    ((char *)&newlp.p_char)[3] = '\0';
+		    if ((newlp.p_char[0] & 0x80) == 0)
+			newlp.p_char[1] = '\0';
+		    /* strncpy does not guarantee null-termination */
+		    newlp.p_char[sizeof(newlp.p_char)-1] = '\0';
 		    free(symbol);
+		} else if (almost_equals(c_token, "var$iable") && (destination_class == LP_ADHOC)) {
+		    newlp.p_type = PT_VARIABLE;
+		    c_token++;
 		} else {
 		    newlp.p_type = int_expression() - 1;
 		}
@@ -1209,7 +1254,19 @@ lp_parse(struct lp_style_type *lp, lp_class destination_class, TBOOLEAN allow_po
 		newlp.p_interval = int_expression();
 		set_pi = 1;
 	    } else {
-		int_warn(c_token, "No pointinterval specifier allowed, here");
+		int_warn(c_token, "No pointinterval specifier allowed here");
+		int_expression();
+	    }
+	    continue;
+	}
+
+	if (almost_equals(c_token, "pointn$umber") || equals(c_token, "pn")) {
+	    c_token++;
+	    if (allow_point) {
+		newlp.p_number = int_expression();
+		set_pn = 1;
+	    } else {
+		int_warn(c_token, "No pointnumber specifier allowed here)");
 		int_expression();
 	    }
 	    continue;
@@ -1236,8 +1293,9 @@ lp_parse(struct lp_style_type *lp, lp_class destination_class, TBOOLEAN allow_po
 	break;
     }
 
-    if (set_lt > 1 || set_pal > 1 || set_lw > 1 || set_pt > 1 || set_ps > 1 || set_dt > 1)
-	int_error(c_token, "duplicated arguments in style specification");
+    if (set_lt > 1 || set_pal > 1 || set_lw > 1 || set_pt > 1 || set_ps > 1 || set_dt > 1
+    || (set_pi + set_pn > 1))
+	int_error(c_token, "duplicate or conflicting arguments in style specification");
 
     if (set_pal) {
 	lp->pm3d_color = newlp.pm3d_color;
@@ -1250,12 +1308,18 @@ lp_parse(struct lp_style_type *lp, lp_class destination_class, TBOOLEAN allow_po
 	lp->l_width = newlp.l_width;
     if (set_pt) {
 	lp->p_type = newlp.p_type;
-	lp->p_char = newlp.p_char;
+	memcpy(lp->p_char, newlp.p_char, sizeof(newlp.p_char));
     }
     if (set_ps)
 	lp->p_size = newlp.p_size;
-    if (set_pi)
+    if (set_pi) {
 	lp->p_interval = newlp.p_interval;
+        lp->p_number = 0;
+    }
+    if (set_pn) {
+        lp->p_number = newlp.p_number;
+	lp->p_interval = 0;
+    }
     if (newlp.l_type == LT_COLORFROMCOLUMN)
 	lp->l_type = LT_COLORFROMCOLUMN;
     if (set_dt) {
@@ -1300,6 +1364,7 @@ parse_fillstyle(struct fill_style_type *fs, int def_style, int def_density, int 
 
 	if (almost_equals(c_token, "trans$parent")) {
 	    transparent = TRUE;
+	    fs->filldensity = 50;
 	    c_token++;
 	    continue;
 	}
@@ -1318,8 +1383,11 @@ parse_fillstyle(struct fill_style_type *fs, int def_style, int def_density, int 
 		fs->fillstyle = i;
 		set_fill = TRUE;
 		c_token++;
-		
-		if (isanumber(c_token) || type_udv(c_token) == INTGR || type_udv(c_token) == CMPLX) {
+
+		if (!transparent)
+		    fs->filldensity = 100;
+
+		if (might_be_numeric(c_token)) {
 		    if (fs->fillstyle == FS_SOLID) {
 			/* user sets 0...1, but is stored as an integer 0..100 */
 			fs->filldensity = 100.0 * real_expression() + 0.5;
@@ -1525,19 +1593,29 @@ arrow_use_properties(struct arrow_style_type *arrow, int tag)
      *  copies its data into the structure 'ap'. */
     struct arrowstyle_def *this;
 
+    /* If a color has already been set for this arrow, keep it */
+    struct t_colorspec save_colorspec = arrow->lp_properties.pm3d_color;
+
+    /* Default if requested style is not found */
+    default_arrow_style(arrow);
+
     this = first_arrowstyle;
     while (this != NULL) {
 	if (this->tag == tag) {
 	    *arrow = this->arrow_properties;
-	    return;
+	    break;
 	} else {
 	    this = this->next;
 	}
     }
 
     /* tag not found: */
-    default_arrow_style(arrow);
-    int_warn(NO_CARET,"arrowstyle %d not found", tag);
+    if (!this || this->tag != tag)
+	int_warn(NO_CARET,"arrowstyle %d not found", tag);
+
+    /* Restore orginal color if the style doesn't specify one */
+    if (arrow->lp_properties.pm3d_color.type == TC_DEFAULT)
+	arrow->lp_properties.pm3d_color = save_colorspec;
 }
 
 void
@@ -1691,4 +1769,59 @@ get_image_options(t_image *image)
 	image->fallback = TRUE;
     }
 
+}
+
+
+enum set_encoding_id
+encoding_from_locale(void)
+{
+    char *l = NULL;
+    enum set_encoding_id encoding = S_ENC_INVALID;
+
+#if defined(_WIN32)
+#ifdef HAVE_LOCALE_H
+    char * cp_str;
+
+    l = setlocale(LC_CTYPE, "");
+    /* preserve locale string, skip language information */
+    cp_str = strchr(l, '.');
+    if (cp_str) {
+	unsigned cp;
+
+	cp_str++; /* Step past the dot in, e.g., German_Germany.1252 */
+	cp = strtoul(cp_str, NULL, 10);
+
+	if (cp != 0) {
+	    enum set_encoding_id newenc = WinGetEncoding(cp);
+	    encoding = newenc;
+	}
+    }
+#endif
+    /* get encoding from currently active codepage */
+    if (encoding == S_ENC_INVALID) {
+#ifndef WGP_CONSOLE
+	encoding = WinGetEncoding(GetACP());
+#else
+	encoding = WinGetEncoding(GetConsoleCP());
+#endif
+    }
+#elif defined(HAVE_LOCALE_H)
+    l = setlocale(LC_CTYPE, "");
+    if (l && (strstr(l, "utf") || strstr(l, "UTF")))
+	encoding = S_ENC_UTF8;
+    if (l && (strstr(l, "sjis") || strstr(l, "SJIS") || strstr(l, "932")))
+	encoding = S_ENC_SJIS;
+    /* FIXME: "set encoding locale" supports only sjis and utf8 on non-Windows systems */
+#endif
+    return encoding;
+}
+
+
+void
+init_encoding(void)
+{
+    encoding = encoding_from_locale();
+    if (encoding == S_ENC_INVALID)
+	encoding = S_ENC_DEFAULT;
+    init_special_chars();
 }

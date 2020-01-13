@@ -1,5 +1,5 @@
 /*
- * $Id: doc2x.h,v 1.8 2004/04/13 17:23:31 broeker Exp $
+ * $Id: doc2x.h,v 1.7 1999/11/15 22:23:06 lhecking Exp $
  *
  */
 

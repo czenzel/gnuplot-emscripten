@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: term.c,v 1.296.2.22 2016/04/15 18:00:40 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - term.c */
 
 /*[
@@ -93,6 +89,7 @@ static char *RCSid() { return RCSid("$Id: term.c,v 1.296.2.22 2016/04/15 18:00:4
 #include "version.h"
 #include "misc.h"
 #include "multiplot.h"
+#include "readline.h"
 
 #ifdef USE_MOUSE
 #include "mouse.h"
@@ -103,18 +100,16 @@ long mouse_mode = 0;
 char* mouse_alt_string = NULL;
 #endif
 
-#ifdef WIN32
-/* FIXME: Prototypes are in win/wcommon.h */
-FILE *open_printer __PROTO((void));     /* in wprinter.c */
-void close_printer __PROTO((FILE * outfile));
+#ifdef _WIN32
 # include "win/winmain.h"
+# include "win/wcommon.h"
 # ifdef __MSC__
 #  include <malloc.h>
 #  include <io.h>
 # else
 #  include <alloc.h>
 # endif                         /* MSC */
-#endif /* _Windows */
+#endif /* _WIN32 */
 
 static int termcomp __PROTO((const generic * a, const generic * b));
 
@@ -272,7 +267,7 @@ void fflush_binary();
 # define FOPEN_BINARY(file) fopen(file, "wb")
 #endif /* !VMS */
 
-#if defined(MSDOS) || defined(WIN32)
+#if defined(MSDOS) || defined(_WIN32)
 # if defined(__DJGPP__)
 #  include <io.h>
 # endif
@@ -326,7 +321,7 @@ term_close_output()
 	output_pipe_open = FALSE;
     } else
 #endif /* PIPES */
-#ifdef _Windows
+#ifdef _WIN32
     if (stricmp(outstr, "PRN") == 0)
 	close_printer(gpoutfile);
     else
@@ -342,12 +337,6 @@ term_close_output()
 	fclose(gppsfile);
     gppsfile = NULL;
 }
-
-#ifdef OS2
-# define POPEN_MODE ("wb")
-#else
-# define POPEN_MODE ("w")
-#endif
 
 /* assigns dest to outstr, so it must be allocated or NULL
  * and it must not be outstr itself !
@@ -377,7 +366,7 @@ term_set_output(char *dest)
 #if defined(PIPES)
 	if (*dest == '|') {
 	    restrict_popen();
-#ifdef _Windows
+#ifdef _WIN32
 	    if (term && (term->flags & TERM_BINARY))
 		f = popen(dest + 1, "wb");
 	    else
@@ -392,7 +381,7 @@ term_set_output(char *dest)
 	} else {
 #endif /* PIPES */
 
-#ifdef _Windows
+#ifdef _WIN32
 	if (outstr && stricmp(outstr, "PRN") == 0) {
 	    /* we can't call open_printer() while printer is open, so */
 	    close_printer(gpoutfile);   /* close printer immediately if open */
@@ -482,24 +471,38 @@ term_initialise()
 	    fputs("Cannot reopen output file in binary", stderr);
 	/* and carry on, hoping for the best ! */
     }
-#if defined(MSDOS) || defined (_Windows) || defined(OS2)
-# ifdef _Windows
+#if defined(MSDOS) || defined (_WIN32) || defined(OS2)
+# ifdef _WIN32
     else if (!outstr && (term->flags & TERM_BINARY))
 # else
     else if (!outstr && !interactive && (term->flags & TERM_BINARY))
 # endif
 	{
+#if defined(_WIN32) && !defined(WGP_CONSOLE)
+#ifdef PIPES
+	    if (!output_pipe_open)
+#endif
+		if (outstr == NULL && !(term->flags & TERM_NO_OUTPUTFILE))
+		    int_error(c_token, "cannot output binary data to wgnuplot text window");
+#endif
 	    /* binary to stdout in non-interactive session... */
 	    fflush(stdout);
 	    setmode(fileno(stdout), O_BINARY);
 	}
 #endif
 
-
     if (!term_initialised || term_force_init) {
 	FPRINTF((stderr, "- calling term->init()\n"));
 	(*term->init) ();
 	term_initialised = TRUE;
+#ifdef HAVE_LOCALE_H
+	/* This is here only from an abundance of caution (a.k.a. paranoia).
+	 * Some terminals (wxt qt caca) are known to change the locale when
+	 * initialized.  Others have been implicated (gd).  Rather than trying
+	 * to catch all such offenders one by one, cover for all of them here.
+	 */
+	setlocale(LC_NUMERIC, "C");
+#endif
     }
 }
 
@@ -592,7 +595,7 @@ term_reset()
 #ifdef USE_MOUSE
     /* Make sure that ^C will break out of a wait for 'pause mouse' */
     paused_for_mouse = 0;
-#ifdef WIN32
+#ifdef _WIN32
     kill_pending_Pause_dialog();
 #endif
 #endif
@@ -650,6 +653,12 @@ term_apply_lp_properties(struct lp_style_type *lp)
      */
     (*term->linewidth) (lp->l_width);
 
+    /* LT_DEFAULT (used only by "set errorbars"?) means don't change it */
+    /* FIXME: If this causes problems, test also for LP_ERRORBAR_SET    */
+    if (lt == LT_DEFAULT)
+	;
+    else
+
     /* The paradigm for handling linetype and dashtype in version 5 is */
     /* linetype < 0 (e.g. LT_BACKGROUND, LT_NODRAW) means some special */
     /* category that will be handled directly by term->linetype().     */
@@ -679,7 +688,7 @@ term_apply_lp_properties(struct lp_style_type *lp)
 	(*term->dashtype) (dt, NULL);
 
     /* Finally adjust the color of the line */
-    apply_pm3dcolor(&colorspec, term);
+    apply_pm3dcolor(&colorspec);
 }
 
 void
@@ -1125,7 +1134,7 @@ do_arrow(
 
 void
 do_arc(
-    unsigned int cx, unsigned int cy, /* Center */
+    int cx, int cy, /* Center */
     double radius, /* Radius */
     double arc_start, double arc_end, /* Limits of arc in degress */
     int style, TBOOLEAN wedge)
@@ -1154,10 +1163,6 @@ do_arc(
 
     /* Calculate the vertices */
     aspect = (double)term->v_tic / (double)term->h_tic;
-#ifdef WIN32
-    if (strcmp(term->name, "windows") == 0)
-	aspect = 1.;
-#endif
     for (i=0; i<segments; i++) {
 	vertex[i].x = cx + cos(DEG2RAD * (arc_start + i*INC)) * radius;
 	vertex[i].y = cy + sin(DEG2RAD * (arc_start + i*INC)) * radius * aspect;
@@ -1231,15 +1236,15 @@ null_justify_text(enum JUSTIFY just)
 }
 
 
-/* Change scale of plot.
- * Parameters are x,y scaling factors for this plot.
- * Some terminals (eg latex) need to do scaling themselves.
+/* 
+ * Deprecated terminal function (pre-version 3)
  */
 static int
 null_scale(double x, double y)
 {
     (void) x;                   /* avoid -Wunused warning */
     (void) y;
+    int_error(NO_CARET, "Attempt to call deprecated terminal function");
     return FALSE;               /* can't be done */
 }
 
@@ -1427,6 +1432,8 @@ set_term()
 	input_name = gp_input_line + token[c_token].start_index;
 	t = change_term(input_name, token[c_token].length);
 	if (!t && isstringvalue(c_token) && (input_name = try_to_get_string())) {
+	    if (strchr(input_name, ' '))
+		*strchr(input_name, ' ') = '\0';
 	    t = change_term(input_name, strlen(input_name));
 	    free(input_name);
 	} else {
@@ -1491,9 +1498,6 @@ change_term(const char *origname, int length)
     term = t;
     term_initialised = FALSE;
 
-    if (term->scale != null_scale)
-	fputs("Warning: scale interface is not null_scale - may not work with multiplot\n", stderr);
-
     /* check that optional fields are initialised to something */
     if (term->text_angle == 0)
 	term->text_angle = null_text_angle;
@@ -1521,7 +1525,7 @@ change_term(const char *origname, int length)
 	term->dashtype = null_dashtype;
 
     if (interactive)
-	fprintf(stderr, "Terminal type set to '%s'\n", term->name);
+	fprintf(stderr, "\nTerminal type is now '%s'\n", term->name);
 
     /* Invalidate any terminal-specific structures that may be active */
     invalidate_palette();
@@ -1530,9 +1534,7 @@ change_term(const char *origname, int length)
 }
 
 /*
- * Routine to detect what terminal is being used (or do anything else
- * that would be nice).  One anticipated (or allowed for) side effect
- * is that the global ``term'' may be set.
+ * Find an appropriate initial terminal type.
  * The environment variable GNUTERM is checked first; if that does
  * not exist, then the terminal hardware is checked, if possible,
  * and finally, we can check $TERM for some kinds of terminals.
@@ -1544,7 +1546,7 @@ void
 init_terminal()
 {
     char *term_name = DEFAULTTERM;
-#if (defined(MSDOS) && !defined(_Windows)) || defined(NEXT) || defined(SUN) || defined(X11)
+#if (defined(MSDOS) && !defined(_WIN32)) || defined(SUN) || defined(X11)
     char *env_term = NULL;      /* from TERM environment var */
 #endif
 #ifdef X11
@@ -1555,19 +1557,26 @@ init_terminal()
     /* GNUTERM environment variable is primary */
     gnuterm = getenv("GNUTERM");
     if (gnuterm != (char *) NULL) {
-	term_name = gnuterm;
+	/* April 2017 - allow GNUTERM to include terminal options */
+	char *set_term = "set term ";
+	char *set_term_command = gp_alloc(strlen(set_term) + strlen(gnuterm) + 4, NULL);
+	strcpy(set_term_command, set_term);
+	strcat(set_term_command, gnuterm);
+	do_string(set_term_command);
+	free(set_term_command);
+	/* replicate environmental variable GNUTERM for internal use */
+	Gstring(&(add_udv_by_name("GNUTERM")->udv_value), gp_strdup(gnuterm));
+	return;
+
     } else {
 
 #ifdef VMS
 	term_name = vms_init();
 #endif /* VMS */
 
-#ifdef NEXT
-	env_term = getenv("TERM");
 	if (term_name == (char *) NULL
-	    && env_term != (char *) NULL && strcmp(env_term, "next") == 0)
-	    term_name = "next";
-#endif /* NeXT */
+            && getenv ("DOMTERM") != NULL)
+          term_name = "domterm";
 
 #ifdef __BEOS__
 	env_term = getenv("TERM");
@@ -1576,19 +1585,9 @@ init_terminal()
 	    term_name = "be";
 #endif /* BeOS */
 
-#ifdef SUN
-	env_term = getenv("TERM");      /* try $TERM */
-	if (term_name == (char *) NULL
-	    && env_term != (char *) NULL && strcmp(env_term, "sun") == 0)
-	    term_name = "sun";
-#endif /* SUN */
-
-#ifdef WIN32
-#ifdef WXWIDGETS
-	/* let the wxWidgets terminal be the default when available */
+#if defined(WXWIDGETS) && defined(_WIN32)
 	if (term_name == (char *) NULL)
 	    term_name = "wxt";
-#endif
 #endif
 
 #ifdef QTTERM
@@ -1601,10 +1600,10 @@ init_terminal()
 	    term_name = "wxt";
 #endif
 
-#ifdef _Windows
+#ifdef _WIN32
 	if (term_name == (char *) NULL)
 	    term_name = "win";
-#endif /* _Windows */
+#endif /* _WIN32 */
 
 #if defined(__APPLE__) && defined(__MACH__) && defined(HAVE_FRAMEWORK_AQUATERM)
 	/* Mac OS X with AquaTerm installed */
@@ -1664,7 +1663,6 @@ init_terminal()
 	struct udvt_entry *name = add_udv_by_name("GNUTERM");
 
 	Gstring(&name->udv_value, gp_strdup(term_name));
-	name->udv_undef = FALSE;
 
 	if (strchr(term_name,' '))
 	    namelength = strchr(term_name,' ') - term_name;
@@ -1748,22 +1746,43 @@ test_term()
     (*t->vector) (x0 + xmax_t / 2, y0 + ymax_t - 1);
     (*t->move) (x0, y0 + ymax_t / 2);
     (*t->vector) (x0 + xmax_t - 1, y0 + ymax_t / 2);
-    /* test width and height of characters */
-    (*t->linetype) (LT_SOLID);
-    newpath();
-    (*t->move) (x0 + xmax_t / 2 - t->h_char * 10, y0 + ymax_t / 2 + t->v_char / 2);
-    (*t->vector) (x0 + xmax_t / 2 + t->h_char * 10, y0 + ymax_t / 2 + t->v_char / 2);
-    (*t->vector) (x0 + xmax_t / 2 + t->h_char * 10, y0 + ymax_t / 2 - t->v_char / 2);
-    (*t->vector) (x0 + xmax_t / 2 - t->h_char * 10, y0 + ymax_t / 2 - t->v_char / 2);
-    (*t->vector) (x0 + xmax_t / 2 - t->h_char * 10, y0 + ymax_t / 2 + t->v_char / 2);
-    closepath();
-    (*t->put_text) (x0 + xmax_t / 2 - t->h_char * 10, y0 + ymax_t / 2,
-		    "12345678901234567890");
-    (*t->put_text) (x0 + xmax_t / 2 - t->h_char * 10, y0 + ymax_t / 2 + t->v_char * 1.4,
-		    "test of character width:");
-    (*t->linetype) (LT_BLACK);
+
+    /* How well can we estimate width and height of characters?
+     * Textbox fill shows true size, surrounding box shows the generic estimate
+     * used to reserve space during plot layout.
+     */
+#ifdef EAM_BOXED_TEXT
+    if (TRUE) {
+	struct text_label sample = EMPTY_LABELSTRUCT;
+	struct textbox_style save_opts = textbox_opts;
+	sample.text = "12345678901234567890";
+	sample.pos = CENTRE;
+	sample.boxed = 1;
+	textbox_opts.opaque = TRUE;
+	textbox_opts.noborder = TRUE;
+	textbox_opts.fillcolor.type = TC_RGB;
+	textbox_opts.fillcolor.lt = 0xccccee;
+
+	(*t->linetype) (LT_SOLID);
+	write_label(xmax_t/2, ymax_t/2, &sample);
+	textbox_opts = save_opts;
+
+	sample.boxed = 0;
+	sample.text = "true vs. estimated text dimensions";
+	write_label(xmax_t/2, ymax_t/2 + 1.5 * t->v_char, &sample);
+
+	newpath();
+	(*t->move) (x0 + xmax_t / 2 - t->h_char * 10, y0 + ymax_t / 2 + t->v_char / 2);
+	(*t->vector) (x0 + xmax_t / 2 + t->h_char * 10, y0 + ymax_t / 2 + t->v_char / 2);
+	(*t->vector) (x0 + xmax_t / 2 + t->h_char * 10, y0 + ymax_t / 2 - t->v_char / 2);
+	(*t->vector) (x0 + xmax_t / 2 - t->h_char * 10, y0 + ymax_t / 2 - t->v_char / 2);
+	(*t->vector) (x0 + xmax_t / 2 - t->h_char * 10, y0 + ymax_t / 2 + t->v_char / 2);
+	closepath();
+    }
+#endif
 
     /* Test for enhanced text */
+    (*t->linetype) (LT_BLACK);
     if (t->flags & TERM_ENHANCED_TEXT) {
 	char *tmptext1 =   "Enhanced text:   {x@_{0}^{n+1}}";
 	char *tmptext2 = "&{Enhanced text:  }{/:Bold Bold}{/:Italic  Italic}";  
@@ -1791,30 +1810,6 @@ test_term()
     else
 	(*t->put_text) (x0 + xmax_t / 2 - strlen(str) * t->h_char,
 			y0 + ymax_t / 2 + t->v_char * 4, str);
-    /* test text angle */
-    (*t->linetype)(1);
-    str = "rotated ce+ntred text";
-    if ((*t->text_angle) (TEXT_VERTICAL)) {
-	if ((*t->justify_text) (CENTRE))
-	    (*t->put_text) (x0 + t->v_char,
-			    y0 + ymax_t / 2, str);
-	else
-	    (*t->put_text) (x0 + t->v_char,
-			    y0 + ymax_t / 2 - strlen(str) * t->h_char / 2, str);
-	(*t->justify_text) (LEFT);
-	str = " rotated by +45 deg";
-	(*t->text_angle)(45);
-	(*t->put_text)(x0 + t->v_char * 3, y0 + ymax_t / 2, str);
-	(*t->justify_text) (LEFT);
-	str = " rotated by -45 deg";
-	(*t->text_angle)(-45);
-	(*t->put_text)(x0 + t->v_char * 2, y0 + ymax_t / 2, str);
-    } else {
-	(void) (*t->justify_text) (LEFT);
-	(*t->put_text) (x0 + t->h_char * 2, y0 + ymax_t / 2 - t->v_char * 2, "can't rotate text");
-    }
-    (void) (*t->justify_text) (LEFT);
-    (void) (*t->text_angle) (0);
 
     /* test tic size */
     (*t->linetype)(2);
@@ -1853,31 +1848,47 @@ test_term()
 	y -= key_entry_height;
     }
 
-    /* test some arrows */
+    /* test arrows (should line up with rotated text) */
     (*t->linewidth) (1.0);
     (*t->linetype) (0);
     (*t->dashtype) (DASHTYPE_SOLID, NULL);
-    x = x0 + xmax_t * .28;
-    y = y0 + ymax_t * .5;
+    x = x0 + 2. * t->v_char;
+    y = y0 + ymax_t/2;
     xl = t->h_tic * 7;
     yl = t->v_tic * 7;
     i = curr_arrow_headfilled;
-    curr_arrow_headfilled = AS_NOFILL;
-    (*t->arrow) (x, y, x + xl, y, END_HEAD);
-    curr_arrow_headfilled = 1;
-    (*t->arrow) (x, y, x - xl, y, END_HEAD);
-    curr_arrow_headfilled = 2;
-    (*t->arrow) (x, y, x, y + yl, END_HEAD);
-    curr_arrow_headfilled = AS_EMPTY;
-    (*t->arrow) (x, y, x, y - yl, END_HEAD);
     curr_arrow_headfilled = AS_NOBORDER;
-    xl = t->h_tic * 5;
-    yl = t->v_tic * 5;
-    (*t->arrow) (x - xl, y - yl, x + xl, y + yl, END_HEAD | BACKHEAD);
-    (*t->arrow) (x - xl, y + yl, x, y, NOHEAD);
+    (*t->arrow) (x, y-yl, x, y+yl, BOTH_HEADS);
     curr_arrow_headfilled = AS_EMPTY;
-    (*t->arrow) (x, y, x + xl, y - yl, BACKHEAD);
+    (*t->arrow) (x, y, x + xl, y + yl, END_HEAD);
+    curr_arrow_headfilled = AS_NOFILL;
+    (*t->arrow) (x, y, x + xl, y - yl, END_HEAD);
     curr_arrow_headfilled = i;
+
+    /* test text angle (should match arrows) */
+    (*t->linetype)(0);
+    str = "rotated ce+ntred text";
+    if ((*t->text_angle) (TEXT_VERTICAL)) {
+	if ((*t->justify_text) (CENTRE))
+	    (*t->put_text) (x0 + t->v_char,
+			    y0 + ymax_t / 2, str);
+	else
+	    (*t->put_text) (x0 + t->v_char,
+			    y0 + ymax_t / 2 - strlen(str) * t->h_char / 2, str);
+	(*t->justify_text) (LEFT);
+	str = "  rotate by +45";
+	(*t->text_angle)(45);
+	(*t->put_text)(x0 + t->v_char * 3, y0 + ymax_t / 2, str);
+	(*t->justify_text) (LEFT);
+	str = "  rotate by -45";
+	(*t->text_angle)(-45);
+	(*t->put_text)(x0 + t->v_char * 3, y0 + ymax_t / 2, str);
+    } else {
+	(void) (*t->justify_text) (LEFT);
+	(*t->put_text) (x0 + t->h_char * 2, y0 + ymax_t / 2, "cannot rotate text");
+    }
+    (void) (*t->justify_text) (LEFT);
+    (void) (*t->text_angle) (0);
 
     /* test line widths */
     (void) (*t->justify_text) (LEFT);
@@ -1975,7 +1986,7 @@ test_term()
 	    str = "No filled polygons";
 	(*t->linetype)(LT_BLACK);
 	i = ((*t->justify_text) (CENTRE)) ? 0 : t->h_char * strlen(str) / 2;
-	(*t->put_text) (cen_x + i, cen_y + radius + t->v_char * 0.5, str);
+	(*t->put_text) (cen_x - i, cen_y + radius + t->v_char * 0.5, str);
     }
 
     term_end_plot();
@@ -2316,8 +2327,10 @@ enhanced_recursion(
 
 		ENH_DEBUG(("Dealing with {\n"));
 
+		/* 30 Sep 2016:  Remove incorrect whitespace-eating loop going */
+		/* waaay back to 31-May-2000 */        /* while (*++p == ' '); */
+		++p;
 		/* get vertical offset (if present) for overprinted text */
-		while (*++p == ' ');
 		if (overprint == 2) {
 		    char *end;
 		    ovp = (float)strtod(p,&end);
@@ -2327,7 +2340,7 @@ enhanced_recursion(
 		    else
 			base += ovp*f;
 		}
-		--p;            /* HBB 20001021: bug fix: 10^{2} broken */
+		--p;
 
 		if (*++p == '/') {
 		    /* then parse a fontname, optional fontsize */
@@ -2338,9 +2351,29 @@ enhanced_recursion(
 			    ;   /* do nothing */
 		    }
 		    start_of_fontname = p;
-		    while ((ch = *p) > ' ' && ch != '=' && ch != '*' && ch != '}' && ch != ':')
+
+		    /* Allow font name to be in quotes.
+		     * This makes it possible to handle font names containing spaces.
+		     */
+		    if (*p == '\'' || *p == '"') {
 			++p;
-		    end_of_fontname = p;
+			while (*p != '\0' && *p != '}' && *p != *start_of_fontname)
+			    ++p;
+			if (*p != *start_of_fontname) {
+			    int_warn(NO_CARET, "cannot interpret font name %s", start_of_fontname);
+			    p = start_of_fontname;
+			}
+			start_of_fontname++;
+			end_of_fontname = p++;
+			ch = *p;
+		    } else {
+
+		    /* Normal unquoted font name */
+			while ((ch = *p) > ' ' && ch != '=' && ch != '*' && ch != '}' && ch != ':')
+			    ++p;
+			end_of_fontname = p;
+		    }
+
 		    do {
 			if (ch == '=') {
 			    /* get optional font size */
@@ -2594,7 +2627,7 @@ enh_err_check(const char *str)
  * developed later they can be slotted into this one call site.
  */
 int
-estimate_strlen(char *text)
+estimate_strlen(const char *text)
 {
 int len;
 
@@ -2636,11 +2669,17 @@ estimate_plaintext(char *enhancedtext)
 void
 ignore_enhanced(TBOOLEAN flag)
 {
-    /* Force a return to the default font */
+#if (0)
+    /* Apr 2018: This code was introduced long ago (2005; Bug #266) to address
+     * a glitch in the postscript terminal that left the last-used font in
+     * an enhanced text string active afterwards.
+     * We now deal with this in ENHPS_put_text() instead.
+     */
     if (flag && !ignore_enhanced_text) {
 	ignore_enhanced_text = TRUE;
 	term->set_font("");
     }
+#endif
     ignore_enhanced_text = flag;
 }
 
@@ -2826,7 +2865,8 @@ load_linetype(struct lp_style_type *lp, int tag)
 
 recycle:
 
-    if ((tag > 0) && (monochrome || (term->flags & TERM_MONOCHROME))) {
+    if ((tag > 0)
+    && (monochrome || (term && (term->flags & TERM_MONOCHROME)))) {
 	for (this = first_mono_linestyle; this; this = this->next) {
 	    if (tag == this->tag) {
 		*lp = this->lp_properties;
@@ -2856,7 +2896,7 @@ recycle:
 
 	    /* Needed in version 5.0 to handle old terminals (pbm hpgl ...) */
 	    /* with no support for user-specified colors */
-	    if (term->set_color == null_set_color)
+	    if (term && term->set_color == null_set_color)
 		lp->l_type = tag;
 
 	    /* Do not recycle point properties. */
@@ -2864,8 +2904,8 @@ recycle:
 	    if (!recycled) {
 	    	lp->p_type = this->lp_properties.p_type;
 	    	lp->p_interval = this->lp_properties.p_interval;
-	    	lp->p_char = this->lp_properties.p_char;
 	    	lp->p_size = this->lp_properties.p_size;
+	    	memcpy(lp->p_char, this->lp_properties.p_char, sizeof(lp->p_char));
 	    }
 	    return;
 	} else {
@@ -2936,7 +2976,7 @@ strlen_tex(const char *str)
 	switch (*s) {
 	case '[':
 		while (*s && *s != ']') s++;
-		s++;
+		if (*s) s++;
 		break;
 	case '\\':
 		s++;
@@ -2977,13 +3017,13 @@ check_for_mouse_events()
 	term->waitforinput(TERM_ONLY_CHECK_MOUSING);
     }
 #endif
-#ifdef WIN32
+#ifdef _WIN32
     /* Process windows GUI events (e.g. for text window, or wxt and windows terminals) */
     WinMessageLoop();
     /* On Windows, Ctrl-C only sets this flag. */
     /* The next block duplicates the behaviour of inter(). */
     if (ctrlc_flag) {
-    ctrlc_flag = FALSE;
+	ctrlc_flag = FALSE;
 	term_reset();
 	putc('\n', stderr);
 	fprintf(stderr, "Ctrl-C detected!\n");

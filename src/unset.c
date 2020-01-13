@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: unset.c,v 1.206.2.11 2016/08/07 18:41:09 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - unset.c */
 
 /*[
@@ -43,7 +39,9 @@ static char *RCSid() { return RCSid("$Id: unset.c,v 1.206.2.11 2016/08/07 18:41:
 #include "fit.h"
 #include "gp_hist.h"
 #include "hidden3d.h"
+#include "jitter.h"
 #include "misc.h"
+#include "multiplot.h"
 #include "parse.h"
 #include "plot.h"
 #include "plot2d.h"
@@ -55,6 +53,7 @@ static char *RCSid() { return RCSid("$Id: unset.c,v 1.206.2.11 2016/08/07 18:41:
 #include "variable.h"
 #include "pm3d.h"
 
+static void unset_all_tics __PROTO((void));
 static void unset_angles __PROTO((void));
 static void unset_arrow __PROTO((void));
 static void unset_arrowstyles __PROTO((void));
@@ -98,18 +97,17 @@ static void unset_style_ellipse __PROTO(());
 #endif
 static void unset_loadpath __PROTO((void));
 static void unset_locale __PROTO((void));
-static void reset_logscale __PROTO((AXIS_INDEX));
+static void reset_logscale __PROTO((struct axis *));
 static void unset_logscale __PROTO((void));
 static void unset_mapping __PROTO((void));
 static void unset_margin __PROTO((t_position *));
 static void unset_missing __PROTO((void));
+static void unset_micro __PROTO((void));
 static void unset_minus_sign __PROTO((void));
-#ifdef USE_MOUSE
 static void unset_mouse __PROTO((void));
-#endif
 
 static void unset_month_day_tics __PROTO((AXIS_INDEX));
-static void unset_minitics __PROTO((AXIS_INDEX));
+static void unset_minitics __PROTO((struct axis *));
 
 static void unset_offsets __PROTO((void));
 static void unset_origin __PROTO((void));
@@ -130,7 +128,7 @@ static void unset_style __PROTO((void));
 static void unset_surface __PROTO((void));
 static void unset_table __PROTO((void));
 static void unset_terminal __PROTO((void));
-static void unset_tics __PROTO((AXIS_INDEX));
+static void unset_tics __PROTO((struct axis *));
 static void unset_ticslevel __PROTO((void));
 static void unset_timefmt __PROTO((void));
 static void unset_timestamp __PROTO((void));
@@ -246,6 +244,9 @@ unset_command()
     case S_ISOSAMPLES:
 	unset_isosamples();
 	break;
+    case S_JITTER:
+	unset_jitter();
+	break;
     case S_KEY:
 	unset_key();
 	break;
@@ -256,6 +257,7 @@ unset_command()
 	unset_linetype();
 	break;
     case S_LINK:
+    case S_NONLINEAR:
 	c_token--;
 	link_command();
 	break;
@@ -328,17 +330,18 @@ unset_command()
 	df_commentschars = gp_strdup(DEFAULT_COMMENTS_CHARS);
 	df_unset_datafile_binary();
 	break;
+    case S_MICRO:
+	unset_micro();
+	break;
     case S_MINUS_SIGN:
 	unset_minus_sign();
 	break;
     case S_MONOCHROME:
 	unset_monochrome();
 	break;
-#ifdef USE_MOUSE
     case S_MOUSE:
 	unset_mouse();
 	break;
-#endif
     case S_MULTIPLOT:
 	term_end_multiplot();
 	break;
@@ -384,16 +387,21 @@ unset_command()
 	break;
 #endif
     case S_RTICS:
-	unset_tics(POLAR_AXIS);
+	unset_tics(&axis_array[POLAR_AXIS]);
+	break;
+    case S_TTICS:
+	unset_tics(&THETA_AXIS);
 	break;
     case S_PAXIS:
 	i = int_expression();
-	if (i <= 0 || i > MAX_PARALLEL_AXES)
-	    int_error(c_token, "expecting parallel axis number");
 	if (almost_equals(c_token, "tic$s")) {
-	    unset_tics(PARALLEL_AXES+i-1);
+	    if (i > 0 && i <= num_parallel_axes)
+		unset_tics(&parallel_axis[i-1]);
 	    c_token++;
 	}
+	break;
+    case S_RGBMAX:
+	rgbmax = 255;
 	break;
     case S_SAMPLES:
 	unset_samples();
@@ -414,7 +422,7 @@ unset_command()
 	unset_terminal();
 	break;
     case S_TICS:
-	unset_tics(ALL_AXES);
+	unset_all_tics();
 	break;
     case S_TICSCALE:
 	int_warn(c_token, "Deprecated syntax - use 'set tics scale default'");
@@ -440,67 +448,70 @@ unset_command()
 	break;
 /* FIXME - are the tics correct? */
     case S_MXTICS:
-	unset_minitics(FIRST_X_AXIS);
+	unset_minitics(&axis_array[FIRST_X_AXIS]);
 	break;
     case S_XTICS:
-	unset_tics(FIRST_X_AXIS);
+	unset_tics(&axis_array[FIRST_X_AXIS]);
 	break;
     case S_XDTICS:
     case S_XMTICS:
 	unset_month_day_tics(FIRST_X_AXIS);
 	break;
     case S_MYTICS:
-	unset_minitics(FIRST_Y_AXIS);
+	unset_minitics(&axis_array[FIRST_Y_AXIS]);
 	break;
     case S_YTICS:
-	unset_tics(FIRST_Y_AXIS);
+	unset_tics(&axis_array[FIRST_Y_AXIS]);
 	break;
     case S_YDTICS:
     case S_YMTICS:
 	unset_month_day_tics(FIRST_X_AXIS);
 	break;
     case S_MX2TICS:
-	unset_minitics(SECOND_X_AXIS);
+	unset_minitics(&axis_array[SECOND_X_AXIS]);
 	break;
     case S_X2TICS:
-	unset_tics(SECOND_X_AXIS);
+	unset_tics(&axis_array[SECOND_X_AXIS]);
 	break;
     case S_X2DTICS:
     case S_X2MTICS:
 	unset_month_day_tics(FIRST_X_AXIS);
 	break;
     case S_MY2TICS:
-	unset_minitics(SECOND_Y_AXIS);
+	unset_minitics(&axis_array[SECOND_Y_AXIS]);
 	break;
     case S_Y2TICS:
-	unset_tics(SECOND_Y_AXIS);
+	unset_tics(&axis_array[SECOND_Y_AXIS]);
 	break;
     case S_Y2DTICS:
     case S_Y2MTICS:
 	unset_month_day_tics(SECOND_Y_AXIS);
 	break;
     case S_MZTICS:
-	unset_minitics(FIRST_Z_AXIS);
+	unset_minitics(&axis_array[FIRST_Z_AXIS]);
 	break;
     case S_ZTICS:
-	unset_tics(FIRST_Z_AXIS);
+	unset_tics(&axis_array[FIRST_Z_AXIS]);
 	break;
     case S_ZDTICS:
     case S_ZMTICS:
 	unset_month_day_tics(FIRST_X_AXIS);
 	break;
     case S_MCBTICS:
-	unset_minitics(COLOR_AXIS);
+	unset_minitics(&axis_array[COLOR_AXIS]);
 	break;
     case S_CBTICS:
-	unset_tics(COLOR_AXIS);
+	unset_tics(&axis_array[COLOR_AXIS]);
 	break;
     case S_CBDTICS:
     case S_CBMTICS:
 	unset_month_day_tics(FIRST_X_AXIS);
 	break;
     case S_MRTICS:
-	unset_minitics(POLAR_AXIS);
+	unset_minitics(&axis_array[POLAR_AXIS]);
+	break;
+    case S_MTTICS:
+	unset_minitics(&THETA_AXIS);
 	break;
     case S_XDATA:
 	unset_timedata(FIRST_X_AXIS);
@@ -531,6 +542,9 @@ unset_command()
 	break;
     case S_CBLABEL:
 	unset_axislabel(COLOR_AXIS);
+	break;
+    case S_RLABEL:
+	unset_axislabel(POLAR_AXIS);
 	break;
     case S_X2LABEL:
 	unset_axislabel(SECOND_X_AXIS);
@@ -687,6 +701,8 @@ unset_autoscale()
 	int axis;
 	for (axis=0; axis<AXIS_ARRAY_SIZE; axis++)
 	    axis_array[axis].set_autoscale = FALSE;
+	for (axis=0; axis<num_parallel_axes; axis++)
+	    parallel_axis[axis].set_autoscale = FALSE;
     } else if (equals(c_token, "xy") || equals(c_token, "tyx")) {
 	axis_array[FIRST_X_AXIS].set_autoscale
 	    = axis_array[FIRST_Y_AXIS].set_autoscale = AUTOSCALE_NONE;
@@ -710,6 +726,18 @@ unset_bars()
     bar_size = 0.0;
 }
 
+/* reset is different from unset */
+/* This gets called from 'set bars default' also */
+void
+reset_bars()
+{
+    struct lp_style_type def = DEFAULT_LP_STYLE_TYPE;
+    bar_lp = def;
+    bar_lp.l_type = LT_DEFAULT;
+    bar_lp.pm3d_color.type = TC_VARIABLE;
+    bar_size = 1.0;
+    bar_layer = LAYER_FRONT;
+}
 
 /* process 'unset border' command */
 static void
@@ -780,6 +808,8 @@ unset_cntrparam()
     contour_order = DEFAULT_CONTOUR_ORDER;
     contour_levels = DEFAULT_CONTOUR_LEVELS;
     contour_levels_kind = LEVELS_AUTO;
+    contour_firstlinetype = 0;
+    contour_sortlevels = FALSE;
 }
 
 /* process 'unset cntrlabel' command */
@@ -904,10 +934,12 @@ unset_grid()
     AXIS_INDEX i = 0;
 
     /* grid_selection = GRID_OFF; */
-    for (; i < AXIS_ARRAY_SIZE; i++) {
+    for (; i < NUMBER_OF_MAIN_VISIBLE_AXES; i++) {
 	axis_array[i].gridmajor = FALSE;
 	axis_array[i].gridminor = FALSE;
     }
+    polar_grid_angle = 0;
+    grid_vertical_lines = FALSE;
 }
 
 
@@ -1120,13 +1152,13 @@ unset_locale()
 }
 
 static void
-reset_logscale(AXIS_INDEX axis)
+reset_logscale(struct axis *this_axis)
 {
-    TBOOLEAN undo_rlog = (axis == POLAR_AXIS && R_AXIS.log);
-    axis_array[axis].log = FALSE;
+    TBOOLEAN undo_rlog = (this_axis->index == POLAR_AXIS && this_axis->log);
+    this_axis->log = FALSE;
     /* Do not zero the base because we can still use it for gprintf formats
      * %L and %l with linear axis scaling.
-    axis_array[axis].base = 0.0;
+    this_axis->base = 0.0;
      */
     if (undo_rlog)
 	rrange_to_xy();
@@ -1136,34 +1168,55 @@ reset_logscale(AXIS_INDEX axis)
 static void
 unset_logscale()
 {
+    TBOOLEAN set_for_axis[AXIS_ARRAY_SIZE] = AXIS_ARRAY_INITIALIZER(FALSE);
     int axis;
 
     if (END_OF_COMMAND) {
-	/* clean all the islog flags. This will hit some currently
-	 * unused ones, too, but that's actually a good thing, IMHO */
-	for(axis = 0; axis < AXIS_ARRAY_SIZE; axis++)
-	    reset_logscale(axis);
+	for (axis = 0; axis < NUMBER_OF_MAIN_VISIBLE_AXES; axis++)
+	    set_for_axis[axis] = TRUE;
     } else {
+	/* do reverse search because of "x", "x1", "x2" sequence in axisname_tbl */
 	int i = 0;
-
-	/* do reverse search because of "x", "x1", "x2" sequence in
-	 * axisname_tbl */
 	while (i < token[c_token].length) {
-	    axis = lookup_table_nth_reverse(axisname_tbl, LAST_REAL_AXIS+1,
-					    gp_input_line + token[c_token].start_index + i);
+	    axis = lookup_table_nth_reverse(axisname_tbl, NUMBER_OF_MAIN_VISIBLE_AXES,
+		       gp_input_line + token[c_token].start_index + i);
 	    if (axis < 0) {
 		token[c_token].start_index += i;
 		int_error(c_token, "invalid axis");
 	    }
-	    reset_logscale(axisname_tbl[axis].value);
+	    set_for_axis[axisname_tbl[axis].value] = TRUE;
 	    i += strlen(axisname_tbl[axis].key);
 	}
-	++c_token;
+	c_token++;
+    }
+
+#if defined(NONLINEAR_AXES) && (NONLINEAR_AXES > 0)
+    for (axis = 0; axis < NUMBER_OF_MAIN_VISIBLE_AXES; axis++) {
+	if (set_for_axis[axis]) {
+	    static char command[64];
+	    if (!isalpha(axis_name(axis)[0]))
+		continue;
+	    if (axis_array[axis].log) {
+		sprintf(command, "unset nonlinear %s", axis_name(axis));
+		do_string(command); 
+		axis_array[axis].log = FALSE;
+	    }
+	    axis_array[axis].ticdef.logscaling = FALSE;
+	}
+    }
+
+#else
+    for (axis = 0; axis < NUMBER_OF_MAIN_VISIBLE_AXES; axis++) {
+	if (set_for_axis[axis]) {
+	    reset_logscale(&axis_array[axis]);
+	}
     }
 
     /* Because the log scaling is applied during data input, a quick refresh */
     /* using existing stored data will not work if the log setting changes.  */
     SET_REFRESH_OK(E_REFRESH_NOT_OK, 0);
+#endif
+
 }
 
 /* process 'unset mapping3d' command */
@@ -1182,6 +1235,13 @@ unset_margin(t_position *margin)
     margin->x = -1;
 }
 
+/* process 'unset micro' command */
+static void
+unset_micro()
+{
+    use_micro = FALSE;
+}
+
 /* process 'unset minus_sign' command */
 static void
 unset_minus_sign()
@@ -1197,64 +1257,64 @@ unset_missing()
     missing_val = NULL;
 }
 
-#ifdef USE_MOUSE
 /* process 'unset mouse' command */
 static void
 unset_mouse()
 {
+#ifdef USE_MOUSE
     mouse_setting.on = 0;
 #ifdef OS2
     PM_update_menu_items();
 #endif
     UpdateStatusline(); /* wipe status line */
-}
 #endif
+}
 
 /* process 'unset mxtics' command */
 static void
-unset_minitics(AXIS_INDEX axis)
+unset_minitics(struct axis *this_axis)
 {
-    axis_array[axis].minitics = MINI_OFF;
-    axis_array[axis].mtic_freq = 10.0;
+    this_axis->minitics = MINI_OFF;
+    this_axis->mtic_freq = 10.0;
 }
-
 
 /*process 'unset {x|y|x2|y2|z}tics' command */
 static void
-unset_tics(AXIS_INDEX axis)
+unset_all_tics()
+{
+    int i;
+    for (i = 0; i < NUMBER_OF_MAIN_VISIBLE_AXES; i++)
+	unset_tics(&axis_array[i]);
+}
+
+static void
+unset_tics(struct axis *this_axis)
 {
     struct position tics_nooffset = { character, character, character, 0., 0., 0.};
-    unsigned int istart = 0;
-    unsigned int iend = AXIS_ARRAY_SIZE;
-    unsigned int i;
 
-    if (axis != ALL_AXES) {
-	istart = axis;
-	iend = axis + 1;
+    this_axis->ticmode = NO_TICS;
+
+    if (this_axis->ticdef.font) {
+	free(this_axis->ticdef.font);
+	this_axis->ticdef.font = NULL;
     }
+    this_axis->ticdef.textcolor.type = TC_DEFAULT;
+    this_axis->ticdef.textcolor.lt = 0;
+    this_axis->ticdef.textcolor.value = 0;
+    this_axis->ticdef.offset = tics_nooffset;
+    this_axis->ticdef.rangelimited = FALSE; 
+    this_axis->ticdef.enhanced = TRUE;
+    this_axis->tic_rotate = 0;
+    this_axis->ticscale = 1.0;
+    this_axis->miniticscale = 0.5;
+    this_axis->tic_in = TRUE;
+    this_axis->manual_justify = FALSE;
 
-    for (i = istart; i < iend; ++i) {
-	axis_array[i].ticmode = NO_TICS;
+    free_marklist(this_axis->ticdef.def.user);
+    this_axis->ticdef.def.user = NULL;
 
-	if (axis_array[i].ticdef.font) {
-	    free(axis_array[i].ticdef.font);
-	    axis_array[i].ticdef.font = NULL;
-	}
-	axis_array[i].ticdef.textcolor.type = TC_DEFAULT;
-	axis_array[i].ticdef.textcolor.lt = 0;
-	axis_array[i].ticdef.textcolor.value = 0;
-	axis_array[i].ticdef.offset = tics_nooffset;
-	axis_array[i].ticdef.rangelimited = (i >= PARALLEL_AXES) ? TRUE : FALSE;
-	axis_array[i].ticdef.enhanced = TRUE;
-	axis_array[i].tic_rotate = 0;
-	axis_array[i].ticscale = 1.0;
-	axis_array[i].miniticscale = 0.5;
-	axis_array[i].tic_in = TRUE;
-	axis_array[i].manual_justify = FALSE;
-
-	free_marklist(axis_array[i].ticdef.def.user);
-	axis_array[i].ticdef.def.user = NULL;
-    }
+    if (this_axis->index >= PARALLEL_AXES)
+	this_axis->ticdef.rangelimited = TRUE; 
 }
 
 static void
@@ -1374,7 +1434,6 @@ unset_pm3d()
     /* reset styles, required to 'plot something' after e.g. 'set pm3d map' */
     if (data_style == PM3DSURFACE) data_style = POINTSTYLE;
     if (func_style == PM3DSURFACE) func_style = LINES;
-    pm3d.border.l_type = LT_NODRAW;
 }
 
 
@@ -1410,6 +1469,23 @@ unset_polar()
 		(void) fprintf(stderr,"\n\tdummy variable is x for curves\n");
 	}
     }
+    raxis = FALSE;
+    theta_origin = 0.0;
+    theta_direction = 1.0;
+
+    /* Clear and reinitialize THETA axis structure */
+    unset_tics(&THETA_AXIS);
+    unset_minitics(&THETA_AXIS);
+    THETA_AXIS.min = 0.;
+    THETA_AXIS.max = 360.;
+    THETA_AXIS.ticdef = default_axis_ticdef;
+    THETA_AXIS.index = THETA_index;
+    free(THETA_AXIS.formatstring);
+    THETA_AXIS.formatstring = gp_strdup(DEF_FORMAT);
+    THETA_AXIS.ticscale = 1.0;
+    THETA_AXIS.miniticscale = 0.5;
+    THETA_AXIS.tic_in = TRUE;
+    THETA_AXIS.tic_rotate = 0;
 }
 
 
@@ -1556,9 +1632,14 @@ unset_terminal()
 
     term_reset();
 
-    if (original_terminal) {
-	char *termname = original_terminal->udv_value.v.string_val;
+    /* FIXME: change is correct but reported result is truncated */
+    if (original_terminal && original_terminal->udv_value.type != NOTDEFINED) {
+	char *termname = gp_strdup(original_terminal->udv_value.v.string_val);
+	if (strchr(termname, ' '))
+	    *strchr(termname, ' ') = '\0';
+	*term_options = '\0';
 	term = change_term(termname, strlen(termname));
+	free(termname);
     }
     screen_ok = FALSE;
 }
@@ -1587,7 +1668,7 @@ static void
 unset_timestamp()
 {
     unset_axislabel_or_title(&timelabel);
-    timelabel_rotate = 0;
+    timelabel.rotate = 0;
     timelabel_bottom = TRUE;
 }
 
@@ -1603,6 +1684,7 @@ unset_view()
     surface_scale = 1.0;
     surface_lscale = 0.0;
     surface_zscale = 1.0;
+    azimuth = 0.0;
 }
 
 
@@ -1626,14 +1708,14 @@ unset_timedata(AXIS_INDEX axis)
 static void
 unset_range(AXIS_INDEX axis)
 {
-    axis_array[axis].set_autoscale = AUTOSCALE_BOTH;
-    axis_array[axis].writeback_min = axis_array[axis].set_min
-	= axis_defaults[GPMIN(axis,PARALLEL_AXES)].min;
-    axis_array[axis].writeback_max = axis_array[axis].set_max
-	= axis_defaults[GPMIN(axis,PARALLEL_AXES)].max;
-    axis_array[axis].min_constraint = CONSTRAINT_NONE;
-    axis_array[axis].max_constraint = CONSTRAINT_NONE;
-    axis_array[axis].range_flags = 0;
+    struct axis *this_axis = &axis_array[axis];
+
+    this_axis->writeback_min = this_axis->set_min = axis_defaults[axis].min;
+    this_axis->writeback_max = this_axis->set_max = axis_defaults[axis].max;
+    this_axis->set_autoscale = AUTOSCALE_BOTH;
+    this_axis->min_constraint = CONSTRAINT_NONE;
+    this_axis->max_constraint = CONSTRAINT_NONE;
+    this_axis->range_flags = 0;
 }
 
 /* process 'unset {x|y|x2|y2|z}zeroaxis' command */
@@ -1652,27 +1734,22 @@ unset_all_zeroaxes()
 {
     AXIS_INDEX axis;
 
-    for(axis = 0; axis < AXIS_ARRAY_SIZE; axis++)
+    for (axis = 0; axis < NUMBER_OF_MAIN_VISIBLE_AXES; axis++)
 	unset_zeroaxis(axis);
 }
 
 
-/* process 'unset [xyz]{2}label command */
 static void
 unset_axislabel_or_title(text_label *label)
 {
-    struct position default_offset = { character, character, character,
-				       0., 0., 0. };
     if (label) {
 	free(label->text);
-	label->text = NULL;
 	free(label->font);
-	label->font = NULL;
-	label->offset = default_offset;
-	label->textcolor.type = TC_DEFAULT;
+	*label = default_axis_label;
     }
 }
 
+/* process 'unset [xyz]{2}label command */
 static void
 unset_axislabel(AXIS_INDEX axis)
 {
@@ -1680,6 +1757,27 @@ unset_axislabel(AXIS_INDEX axis)
     axis_array[axis].label = default_axis_label;
     if (axis == FIRST_Y_AXIS || axis == SECOND_Y_AXIS || axis == COLOR_AXIS)
 	axis_array[axis].label.rotate = TEXT_VERTICAL;
+}
+
+/*
+ * Free dynamic fields in an axis structure so that it can be safely deleted
+ * or reinitialized.  Doesn't free the axis structure itself.
+ */
+static void
+free_axis_struct(struct axis *this_axis)
+{
+	free(this_axis->formatstring);
+	free(this_axis->ticfmt);
+	if (this_axis->link_udf) {
+	    free(this_axis->link_udf->at);
+	    free(this_axis->link_udf->definition);
+	    free(this_axis->link_udf);
+	}
+	free_marklist(this_axis->ticdef.def.user);
+	free(this_axis->ticdef.font);
+	unset_axislabel_or_title(&this_axis->label);
+	if (this_axis->zeroaxis != &default_axis_zeroaxis)
+	    free(this_axis->zeroaxis);
 }
 
 /******** The 'reset' command ********/
@@ -1730,6 +1828,23 @@ reset_command()
 	    c_token++;
     }
 
+#if (0)
+    /* DEBUG - enable this code for testing
+     * The *.dem unit tests all end with a "reset" command.
+     * In order to test save/load from a wide variety of states we can intercept
+     * this command and insert save/load before execution.
+     */
+    extern TBOOLEAN successful_initialization;
+    if (successful_initialization) {
+	FILE *fp = fopen("/tmp/gnuplot_debug.sav", "w+");
+	replot_line[0] = '\0';
+	save_all(fp);
+	rewind(fp);
+	load_file(fp, gp_strdup("/tmp/gnuplot_debug.sav"), 1);
+	/* load_file closes fp */
+    }
+#endif
+
     /* Kludge alert, HBB 20000506: set to noninteractive mode, to
      * suppress some of the commentary output by the individual
      * unset_...() routines. */
@@ -1737,6 +1852,8 @@ reset_command()
 
     unset_samples();
     unset_isosamples();
+
+    unset_jitter();
 
     /* delete arrows */
     while (first_arrow != NULL)
@@ -1771,43 +1888,48 @@ reset_command()
 
     for (axis=0; axis<AXIS_ARRAY_SIZE; axis++) {
 
-	AXIS default_axis_state = DEFAULT_AXIS_STRUCT;
+	struct axis *this_axis = &axis_array[axis];
 
 	/* Free contents before overwriting with default values */
-	free(axis_array[axis].formatstring);
-	if (axis_array[axis].link_udf) {
-	    free(axis_array[axis].link_udf->at);
-	    free(axis_array[axis].link_udf->definition);
-	    free(axis_array[axis].link_udf);
-	}
-	free_marklist(axis_array[axis].ticdef.def.user);
-	free(axis_array[axis].ticdef.font);
-	unset_zeroaxis(axis);
-	unset_axislabel_or_title(&axis_array[axis].label);
+	free_axis_struct(this_axis);
 
-	memcpy(axis_array+axis, &default_axis_state, sizeof(AXIS));
+	/* Fill with generic values, then customize */
+	memcpy(this_axis, &default_axis_state, sizeof(AXIS));
 
-	unset_axislabel(axis);
-	axis_array[axis].formatstring = gp_strdup(DEF_FORMAT);
-	unset_timedata(axis);
-	unset_range(axis);
+	this_axis->formatstring = gp_strdup(DEF_FORMAT);
+	this_axis->index = axis;
+	unset_axislabel(axis);	/* sets vertical label for y/y2/cb */
+	unset_range(axis);	/* copies min/max from axis_defaults */
 
 	/* 'tics' default is on for some, off for the other axes: */
-	unset_tics(axis);
-	axis_array[axis].ticmode = axis_defaults[GPMIN(axis,PARALLEL_AXES)].ticmode;
-	unset_minitics(axis);
-	axis_array[axis].ticdef = default_axis_ticdef;
-	axis_array[axis].minitics = MINI_DEFAULT;
-	if (axis >= PARALLEL_AXES) {
-	    axis_array[axis].ticdef.rangelimited = TRUE;
-	    axis_array[axis].set_autoscale |= AUTOSCALE_FIXMIN | AUTOSCALE_FIXMAX;
-	}
+	unset_tics(this_axis);
+	unset_minitics(this_axis);
+	this_axis->ticdef = default_axis_ticdef;
+	this_axis->minitics = MINI_DEFAULT;
+	this_axis->ticmode = axis_defaults[axis].ticmode;
 
-	axis_array[axis].linked_to_primary = FALSE;
-
-	reset_logscale(axis);
+	reset_logscale(this_axis);
     }
-    raxis = TRUE;
+
+    /* Free all previously allocated parallel axis structures */
+    for (axis=0; axis<num_parallel_axes; axis++) {
+	struct axis *this_axis = &parallel_axis[axis];
+	free_axis_struct(this_axis);
+    }
+    free(parallel_axis);
+    parallel_axis = NULL;
+    num_parallel_axes = 0;
+
+#ifdef NONLINEAR_AXES
+    if (shadow_axis_array) {
+	for (i=0; i<NUMBER_OF_MAIN_VISIBLE_AXES; i++)
+	    free_axis_struct(&shadow_axis_array[i]);
+	free(shadow_axis_array);
+	shadow_axis_array = NULL;
+    }
+#endif
+
+    raxis = FALSE;
     for (i=2; i<MAX_TICLEVEL; i++)
 	ticscale[i] = 1;
     unset_timefmt();
@@ -1820,6 +1942,7 @@ reset_command()
     clip_lines2 = FALSE;
 
     border_lp = default_border_lp;
+    border_layer = LAYER_FRONT;
     draw_border = 31;
 
     draw_surface = TRUE;
@@ -1831,9 +1954,6 @@ reset_command()
     /* Reset individual plot style options to the default */
     filledcurves_opts_data.closeto = FILLEDCURVES_CLOSED;
     filledcurves_opts_func.closeto = FILLEDCURVES_CLOSED;
-
-    bar_size = 1.0;
-    bar_layer = LAYER_FRONT;
 
     unset_grid();
     grid_lp = default_grid_lp;
@@ -1848,10 +1968,12 @@ reset_command()
     hidden3d = FALSE;
 
     unset_angles();
+    reset_bars();
     unset_mapping();
 
     unset_size();
     aspect_ratio = 0.0;		/* don't force it */
+    rgbmax = 255;
 
     unset_origin();
     unset_timestamp();
@@ -1885,11 +2007,16 @@ reset_command()
     mouse_setting = default_mouse_setting;
 #endif
 
+    /* restore previous multiplot offset and margins */
+    if (multiplot)
+	multiplot_reset();
+
     unset_missing();
     free(df_separators);
     df_separators = NULL;
     free(df_commentschars);
     df_commentschars = gp_strdup(DEFAULT_COMMENTS_CHARS);
+    df_init();
 
     { /* Preserve some settings for `reset`, but not for `unset fit` */
 	verbosity_level save_verbosity = fit_verbosity;

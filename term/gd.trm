@@ -1,6 +1,4 @@
-/* Hello, Emacs, this is -*-C-*-
- * $Id: gd.trm,v 1.179.2.4 2015/07/09 01:40:45 sfeam Exp $
- */
+/* Hello, Emacs, this is -*-C-*- */
 
 /* GNUPLOT -- gd.trm */
 
@@ -94,6 +92,19 @@
  *                          added support for line width and TrueType fonts
  * Shige Takeno, Mar 2011: deal with libgd built to use SJIS rather than UTF-8
  * Ethan Merritt, Apr 2012: Don't claim to support versions 1.x of libgd
+ * kmiya@culti, Nov 2016: sixelgd terminal
+ *
+ * Ethan Merritt, Jun 2019:
+ *	Revisit use of brush for thick lines with alpha channel
+ *	+ setting alpha in the brush itself works OK up to about lw 4.
+ *	  After that the repeated composition of the brush wipes out the transparency.
+ *	- TODO:
+ *	  The brushed line could be written to a separate layer as an opaque object,
+ *	  then composited back onto the main canvas with alpha applied.
+ *	  term->path(start|end) could wrap that, but as of now the core code doesn't use
+ *	  start/end path for most lines.  Alternatively it might be triggered by
+ *	  term->set_color with alpha channel present and last until the color is changed
+ *	  again.
  */
 
 #define GD_DEFINED_COLORS	96	/* Must not exceed size of pm3d_color_names_tbl[] */
@@ -146,15 +157,21 @@ TERM_PUBLIC void ENHGD_boxed_text __PROTO((unsigned int, unsigned int, int));
 #include <gdfontmb.h>
 #include <gdfontg.h>
 
+/* some version test macros */
+#define GD_NUM_VERSION(major, minor, release) \
+	(((major) * 10000) + ((minor) * 100) + (release))
+#define GD_THIS_VERSION \
+	GD_NUM_VERSION(GD_MAJOR_VERSION, GD_MINOR_VERSION, GD_RELEASE_VERSION)
+#define GD_MIN_VERSION(major, minor, release) \
+	(GD_THIS_VERSION >= GD_NUM_VERSION(major, minor,release))
+
 /* Before version 2.0.36, the libgd function gdFTUseFontConfig() didn't */
 /* do what we need.  Test for earlier versions and ignore it.           */
-#ifdef GD_MAJOR_VERSION
-#  if (GD_MINOR_VERSION > 0  ||  GD_RELEASE_VERSION > 35)
-#    define gdUseFontConfig(x) gdFTUseFontConfig(x)
-#  endif
+#if GD_MIN_VERSION(2,0,36)
+# define gdUseFontConfig(x) gdFTUseFontConfig(x)
 #endif
 #ifndef gdUseFontConfig
-#define gdUseFontConfig(x) 0
+# define gdUseFontConfig(x) 0
 #endif
 
 /* These intermediate functions are necessary on Windows since 
@@ -181,9 +198,9 @@ static void PNG_init_brush __PROTO((int));
 #define GREG_YMAX 480
 
 /* This will be the default font */
-# define gdfont gdFontMediumBold
-# define PNG_VCHAR 13
-# define PNG_HCHAR 7
+#define gdfont gdFontMediumBold
+#define PNG_VCHAR 13
+#define PNG_HCHAR 7
 
 #define PNG_TICSIZE (GREG_YMAX/100)
 
@@ -214,11 +231,11 @@ static struct {
     int linewidth;
     TBOOLEAN capbutt;  /* use capbutt on lines with GD2, 20051205 MWS*/
     TBOOLEAN use_builtin;
-    int ttfsize;
+    double ttfsize;
     char *ttffont;
     gdFontPtr default_font;
     char *    default_ttffont;
-    int       default_ttfsize;
+    double    default_ttfsize;
     double    fontscale;
     TBOOLEAN  TrueColor;
     double    dashfraction;	/* Where in a dot-dash pattern we left off */
@@ -405,6 +422,7 @@ image_do_crop ()
 	}
 	bg = gdImageColorAllocateAlpha(im_crop,255,255,255,127);
 
+	/* FIXME: getting black background for truecolor & transparent */
 	gdImagePaletteCopy(im_crop, png_state.image);
 	if (png_state.flags & PNG_USE_TRANSPARENT) {
 	    gdImageColorTransparent(im_crop, bg);
@@ -418,6 +436,11 @@ image_do_crop ()
 	gdImageCopy(im_crop, png_state.image, 0, 0, x1, y1, x, y);
 	gdImageDestroy(png_state.image);
 	png_state.image = im_crop;
+	/* Re-set transparency for sixelgd */
+	if (strcmp("sixelgd", term->name) == 0 && 
+	    png_state.TrueColor && (png_state.flags & PNG_USE_TRANSPARENT)) {
+	    gdImageColorTransparent(png_state.image, png_state.color_table[0]);
+	}
     }
 }
 
@@ -617,7 +640,7 @@ PNG_Diamond(
 TERM_PUBLIC void
 PNG_options()
 {
-    int i;
+    double tmp;
     char *string;
     unsigned long color;
     TBOOLEAN gif_anim_option = FALSE; /* set to TRUE if an animated gif option given */
@@ -639,7 +662,7 @@ PNG_options()
 	PNG_linewidth_factor = 1.0;
 	PNG_dashlength_factor = 1.0;
 	png_state.capbutt = FALSE; /* to preserve previous default behavior */
-#ifdef _Windows
+#ifdef _WIN32
 	/* Set the default search path for fonts to something useful. */
 	if (getenv("GDFONTPATH") == NULL) {
 	    const char fonts[] = "\\fonts";
@@ -650,7 +673,7 @@ PNG_options()
 		if (gdfontpath) {
 		   strcpy(gdfontpath, windir);
 		   strcat(gdfontpath, fonts);
-		   SetEnvironmentVariable("GDFONTPATH", gdfontpath);
+		   SetEnvironmentVariableA("GDFONTPATH", gdfontpath);
 		   free(gdfontpath);
 		}
 	    }
@@ -776,7 +799,7 @@ PNG_options()
 		    char *comma = strrchr(s,',');
 		    double fontsize;
 		    if (comma && (1 == sscanf(comma+1,"%lf",&fontsize))) {
-			png_state.default_ttfsize = (int)(fontsize+0.5);
+			png_state.default_ttfsize = fontsize;
 			png_state.ttfsize = png_state.default_ttfsize;
 			*comma = '\0';
 		    }
@@ -798,13 +821,13 @@ PNG_options()
 		/* First try the old GDFONTPATH mechanism for locating fonts */
 		(void)gdUseFontConfig(0);
 		err = gdImageStringFT(NULL, &brect[0], 0,
-			png_state.ttffont, (double)png_state.default_ttfsize*png_state.fontscale,
+			png_state.ttffont, png_state.default_ttfsize*png_state.fontscale,
 			0.0, 0, 0, "test");
 	
 		/* If that didn't work, try again using the fontconfig mechanism */
 		if (err && gdUseFontConfig(1)) {
 		    err = gdImageStringFT(NULL, &brect[0], 0,
-			png_state.ttffont, (double)png_state.default_ttfsize*png_state.fontscale,
+			png_state.ttffont, png_state.default_ttfsize*png_state.fontscale,
 			0.0, 0, 0, "test");
 		}
 
@@ -892,14 +915,15 @@ PNG_options()
 
 	/* parse gif animation options */
 	case GIF_ANIMATE:
-	    if (strncmp("gif",term->name,3))
+	    if (strncmp("gif",term->name,3) == 0)
+		gif_anim_option = 1;
+	    else if (strncmp("sixel",term->name,5) != 0)
 		int_error(c_token,"Only the gif terminal supports animation");
 	    c_token++;
 	    png_state.animate = TRUE;
 	    png_state.frame_count = 0;
 	    png_state.frame_delay = 10;
 	    png_state.frame_optimization = FALSE;
-	    gif_anim_option = 1;
 	    break;
 	case GIF_DELAY:
 	    if (strncmp("gif",term->name,3))
@@ -955,9 +979,9 @@ PNG_options()
 
 #ifdef HAVE_GD_TTF
 	    /* Check for explicit TTF font size */
-	    if (sscanf(string, "%d", &i) == 1) {
-		if (i > 0 && i < 999)
-		    png_state.default_ttfsize = i;
+	    if (sscanf(string, "%lf", &tmp) == 1) {
+		if (tmp > 0 && tmp < 999)
+		    png_state.default_ttfsize = tmp;
 		else
 		    int_warn(c_token,"illegal font size");
 		c_token++;
@@ -1000,13 +1024,13 @@ PNG_options()
 	/* First try the old GDFONTPATH mechanism for locating fonts */
 	(void)gdUseFontConfig(0);
 	err = gdImageStringFT(NULL, &brect[0], 0,
-		png_state.ttffont, (double)png_state.default_ttfsize*png_state.fontscale,
+		png_state.ttffont, png_state.default_ttfsize*png_state.fontscale,
 		0.0, 0, 0, "test");
 
 	/* If that didn't work, try again using fontconfig mechanism */
 	if (err && gdUseFontConfig(1)) {
 	    err = gdImageStringFT(NULL, &brect[0], 0,
-		png_state.ttffont, (double)png_state.default_ttfsize*png_state.fontscale,
+		png_state.ttffont, png_state.default_ttfsize*png_state.fontscale,
 		0.0, 0, 0, "test");
 	}
 
@@ -1033,7 +1057,7 @@ PNG_options()
 	int brect[8];
 	char *err;
 	err = gdImageStringFT(NULL, &brect[0], 0,
-		png_state.default_ttffont, (double)png_state.default_ttfsize*png_state.fontscale,
+		png_state.default_ttffont, png_state.default_ttfsize*png_state.fontscale,
 		0.0, 0, 0, "f00000000g");
 	if (!err) {
 	    term->h_char = .11 * (float)(brect[2] - brect[0]) + 0.5;
@@ -1084,10 +1108,13 @@ PNG_options()
     }
 
     if (png_state.animate) {
-	sprintf(term_options + strlen(term_options),
-	    "animate delay %d loop %d %soptimize ", 
-	    png_state.frame_delay, png_state.loop_count,
-	    png_state.frame_optimization ? "" : "no");
+	if (strncmp("sixel",term->name,5) == 0)
+	    sprintf(term_options + strlen(term_options), "animate ");
+	else
+	    sprintf(term_options + strlen(term_options),
+		"animate delay %d loop %d %soptimize ", 
+		png_state.frame_delay, png_state.loop_count,
+		png_state.frame_optimization ? "" : "no");
     }
 
     sprintf(term_options + strlen(term_options),
@@ -1103,7 +1130,7 @@ PNG_options()
 		"fontscale %.1f ", png_state.fontscale);
 	if (strlen(term_options) + strlen(png_state.ttffont) < sizeof(term_options) - 32)
 	    sprintf(term_options + strlen(term_options),
-		"font \"%s,%d\" ", png_state.ttffont, png_state.ttfsize);
+		"font \"%s,%.1f\" ", png_state.ttffont, png_state.ttfsize);
     } else switch (term->h_char) {
     case 5:
 	strcat(term_options,"tiny ");
@@ -1156,24 +1183,38 @@ PNG_init_brush(int width)
 	brush = gp_alloc(sizeof(PNG_BRUSH),"gd brush");
 	PNG_brush[width] = brush;
 	brush->last_rgb = -99;  /* Something invalid */
-	if (!((brush->im = gdImageCreate(width,width))))
+	if (!((brush->im = gdImageCreateTrueColor(width,width))))
 	    int_error(NO_CARET,"libgd: failed to create brush structure");
 	brush->bgnd = gdImageColorAllocate( brush->im, 255, 255, 255 );
+	gdImageSaveAlpha(brush->im, 1);
 	gdImageFill(brush->im, 0, 0, brush->bgnd);
 	gdImageColorTransparent(brush->im, brush->bgnd);
     }
 
     if (png_state.color != brush->last_rgb) {
-	brush->fgnd = gdImageColorResolve(brush->im,
-	    gdImageRed(png_state.image,png_state.color),
-	    gdImageGreen(png_state.image,png_state.color),
-	    gdImageBlue(png_state.image,png_state.color) );
+	if (png_state.TrueColor) {
+	    int alpha = (png_state.rgb >> 25) & 0x7f;
+	    /* NB: gdEffectAlphaBlend does not work! */
+	    gdImageAlphaBlending(brush->im, gdEffectReplace);
+	    brush->fgnd = gdImageColorExactAlpha(png_state.image,
+		(png_state.rgb >> 16) & 0xff,
+		(png_state.rgb >> 8) & 0xff,
+		 png_state.rgb & 0xff,
+		 alpha & 0x7f);
+	} else {
+	    brush->fgnd = gdImageColorResolve(brush->im,
+		gdImageRed(png_state.image,png_state.color),
+		gdImageGreen(png_state.image,png_state.color),
+		gdImageBlue(png_state.image,png_state.color) );
+	}
 	brush->last_rgb = png_state.color;
 
-	/* EAM - quick and dirty is to fill the entire brush (square nib)  */
-	/* It might be better to approximate a circular nib by selectively */
-	/* coloring the individual pixels of the brush image.          	   */
+	/* EAM - quick and dirty is to fill the entire brush (square nib) */
+	/* Logically it would be better to approximate a circular nib by  */
+	/* selectively coloring the individual pixels of the brush image, */
+	/* but I tried that and it was not an improvement.                */
 	gdImageFilledRectangle(brush->im, 0, 0, width-1, width-1, brush->fgnd);
+
     }
 }
 
@@ -1199,11 +1240,11 @@ PNG_reset()
 	PNG_fill_tile.im = (gdImagePtr)0;
     }
 #ifdef GIF_ANIMATION
-    if (png_state.animate) {
+    if (png_state.animate && !strncmp(term->name,"gif",3)) {
 	gdImageGifAnimEnd(gpoutfile);
+	fprintf(stderr,"%d frames in animation sequence\n", png_state.frame_count);
 	png_state.frame_count = 0;
 	png_state.animate = FALSE;
-	fprintf(stderr,"End of animation sequence\n");
     }
 #endif
 }
@@ -1434,11 +1475,16 @@ PNG_graphics()
 {
     int i;
     unsigned int rgb;
- 
-    for (i = png_state.n_colors; i < GD_DEFINED_COLORS; i++)
+    unsigned int n_colors = GD_DEFINED_COLORS;
+
+    /* avoid to pre-allocate colors for the sixel terminal in indexed mode */ 
+    if ((strcmp("sixelgd", term->name) == 0) && !png_state.TrueColor)
+	n_colors = 1;
+
+    for (i = png_state.n_colors; i < n_colors; i++)
 	png_state.rgb_table[i] = pm3d_color_names_tbl[i].value;
-    if (png_state.n_colors < GD_DEFINED_COLORS)
-	png_state.n_colors = GD_DEFINED_COLORS;
+    if (png_state.n_colors < n_colors)
+	png_state.n_colors = n_colors;
 
     /* TrueColor images default to a black background; load white instead.	*/
     /* If PNG_USE_TRANSPARENT, store the background alpha in the output file	*/
@@ -1453,13 +1499,13 @@ PNG_graphics()
 	    rgb = gdImageColorAllocateAlpha(png_state.image,
 		(brgb >> 16) & 0xff, (brgb >> 8) & 0xff, brgb & 0xff, 127);
 	    gdImageSaveAlpha(png_state.image, 1);
-	    gdImageAlphaBlending(png_state.image, 0);
+	    gdImageAlphaBlending(png_state.image, gdEffectReplace);
 	} else {
 	    rgb = gdImageColorAllocate(png_state.image,
 		(brgb >> 16) & 0xff, (brgb >> 8) & 0xff, brgb & 0xff);
 	}
 	gdImageFill(png_state.image, 1, 1, rgb);
-	gdImageAlphaBlending(png_state.image, 1);
+	gdImageAlphaBlending(png_state.image, gdEffectNormal);
 
     } else
 	png_state.image = gdImageCreate(PNG_XMAX, PNG_YMAX);
@@ -1484,6 +1530,13 @@ PNG_graphics()
     else
 	gdImageColorTransparent(png_state.image, -1);
 
+    /* Fix for truecolor and transparent options */
+    if (strcmp("sixelgd", term->name) == 0 && 
+        png_state.TrueColor && png_state.flags & PNG_USE_TRANSPARENT) {
+	gdImageAlphaBlending(png_state.image, gdEffectReplace);
+	gdImageFill(png_state.image, 1, 1, png_state.color_table[0]);
+	gdImageAlphaBlending(png_state.image, gdEffectNormal);
+    }
 }
 
 /*
@@ -1521,12 +1574,16 @@ PNG_vector(unsigned int x, unsigned int y)
 {
     int lw = png_state.linewidth;
 
+    if (png_state.linetype == LT_NODRAW) {
+	/* Treat this as PNG_move */
+	;
+
     /* This terminal does not support dashed lines in general, but does   */
     /* render LT_AXIS as a dotted line, used for zeroaxis and grid lines. */
     /* Nov 2014 - rewritten using the algorithm from the canvas terminal. */
     /* FIXME: should either fix this up the rest of the way to support    */
     /* general dash patterns or simplify it back for dotted lines only.   */
-    if (png_state.linetype == LT_AXIS) {
+    } else if (png_state.linetype == LT_AXIS) {
 	static int last_lw = -1;
 	static int last_color = -1;
 	static double dashpattern[4] = {0.1, 0.5, 0.6, 1.0};
@@ -1629,14 +1686,25 @@ PNG_vector(unsigned int x, unsigned int y)
 TERM_PUBLIC void
 PNG_linetype(int type)
 {
-    if (type >= (png_state.n_colors - 3))
-	type %= (png_state.n_colors - 3);
-    if (type <= LT_BACKGROUND) /* LT_NODRAW, LT_BACKGROUND, LT_UNDEFINED */
-	type = -3;	/* Draw in background color */
+    int typeindex;
 
-    png_state.color = png_state.color_table[type + 3];
-    png_state.rgb = png_state.rgb_table[type + 3];
-    png_state.linetype = type;
+    if (type >= (GD_DEFINED_COLORS - 3))
+	type %= (GD_DEFINED_COLORS - 3);
+    typeindex = type;
+    if (typeindex < -3) /* LT_BACKGROUND, LT_UNDEFINED */
+	typeindex = -3;	/* Draw in background color */
+
+    if (typeindex + 3 >= png_state.n_colors) {
+	int rgb = pm3d_color_names_tbl[typeindex + 3].value;
+	png_state.color = gdImageColorResolve(png_state.image, 
+				(rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+	png_state.rgb = rgb;
+    } else {
+	png_state.color = png_state.color_table[typeindex + 3];
+	png_state.rgb = png_state.rgb_table[typeindex + 3];
+    }
+
+    png_state.linetype = type;	/* NB: may still have type <= LT_NODRAW */
 
     if (type == LT_AXIS)
 	png_state.dashfraction = -1.0;
@@ -1674,7 +1742,7 @@ PNG_put_text(unsigned int x, unsigned int y, const char *string)
 	/* Draw once with a NULL image to get the bounding rectangle */
 	/* then draw it again, centered.                             */
 	err = gdImageStringFT(NULL, brect, png_state.color,
-			png_state.ttffont, (double)png_state.ttfsize*png_state.fontscale,
+			png_state.ttffont, png_state.ttfsize*png_state.fontscale,
 			(double)png_state.angle * M_PI_2 / 90. ,
 			x, Y(y), (char *)string);
 	if (err) {
@@ -1696,7 +1764,7 @@ PNG_put_text(unsigned int x, unsigned int y, const char *string)
 		default:	break;
 	    }
 	    err = gdImageStringFT(png_state.image, brect, png_state.color,
-			png_state.ttffont, (double)png_state.ttfsize*png_state.fontscale,
+			png_state.ttffont, png_state.ttfsize*png_state.fontscale,
 			(double)png_state.angle * M_PI_2 / 90.,
 			x, Y(y), (char *)string);
 	    if (err)
@@ -1863,16 +1931,15 @@ TERM_PUBLIC int
 PNG_set_font(const char *fontname)
 {
     int  sep;
-    int  size;
+    double size;
     gdFontPtr font = png_state.default_font;
     char *name = gp_strdup(fontname);
 
     sep = strcspn(fontname,",");
-    strncpy(name,fontname,sep);
     name[sep] = '\0';
-    if ((sscanf(&(fontname[sep+1]),"%d",&size) < 1)
-    || !(size > 0))
-	size = png_state.default_ttfsize;
+    size = png_state.default_ttfsize;
+    if (fontname[sep] == ',')
+	sscanf(&(fontname[sep+1]),"%lf",&size);
 
     if (!strcmp(name,"small"))
 	font = gdFontGetSmall();
@@ -1912,15 +1979,14 @@ PNG_set_font(const char *fontname)
         /* First try the old GDFONTPATH mechanism for locating fonts */
 	(void)gdUseFontConfig(0);
 	err = gdImageStringFT(NULL, &brect[0], 0,
-		png_state.ttffont, (double)png_state.ttfsize*png_state.fontscale,
+		png_state.ttffont, size*png_state.fontscale,
 		0.0, 0, 0, "f00000000g");
 	/* If that didn't work, try again using fontconfig mechanism */
 	if (err && gdUseFontConfig(1)) {
-	    FPRINTF((stderr,"DEBUG1: gd.trm:3: gdUseFontConfig(1) (%s)\n",
-		    png_state.ttffont));
+	    FPRINTF((stderr,"gd.trm:%d gdUseFontConfig(1) (%s)\n",
+		    __LINE__, png_state.ttffont));
 	    err = gdImageStringFT(NULL, &brect[0], 0,
-		png_state.ttffont, 
-		(double)png_state.default_ttfsize*png_state.fontscale,
+		png_state.ttffont, size*png_state.fontscale,
 		0.0, 0, 0, "f00000000g");
 	}
 	if (!err) {
@@ -2209,13 +2275,13 @@ ENHGD_boxed_text(unsigned int x, unsigned int y, int option)
 		png_state.color);
 	break;
     case TEXTBOX_BACKGROUNDFILL:
-	/* Fill the box with background color. FIXME - other colors? */
+	/* Fill the box with current color. */
 	gdImageFilledRectangle(png_state.image,
 		bounding_box[0] - bounding_xmargin,
 		bounding_box[1] - bounding_ymargin,
 		bounding_box[2] + bounding_xmargin,
 		bounding_box[3] + bounding_ymargin,
-		png_state.color_table[0]);
+		png_state.color);
 	break;
     case TEXTBOX_MARGINS:
 	/* Change the text margins */
@@ -2337,7 +2403,6 @@ PNG_image (unsigned int M, unsigned int N, coordval * image, gpiPoint * corner, 
 
     /* Restore previous clipping, if any */
     gdImageSetClip(png_state.image, x1, y1, x2, y2);
-
 }
 
 
@@ -2863,3 +2928,152 @@ END_HELP(gif)
 #endif /* TERM_HELP */
 #endif /* HAVE_GD_GIF */
 #endif
+
+
+#define WITH_GD_SIXEL
+#ifdef WITH_GD_SIXEL
+/*
+ * Sixel support comes almost for free.
+ * We just piggy-back on the libgd PNG routines.
+ */
+
+#ifdef TERM_REGISTER
+register_term(sixelgd)
+#endif
+
+#ifdef TERM_PROTO
+TERM_PUBLIC void SIXELGD_text(void);
+#define GOT_NEXT_PROTO
+#endif
+
+#ifndef TERM_PROTO_ONLY
+
+#ifdef TERM_BODY
+
+#include "sixel.c"
+
+/*
+ * All functions except the final write to file
+ * are actually performed by the PNG driver code
+ */
+TERM_PUBLIC void
+SIXELGD_text()
+{
+    image_do_crop();
+
+    /* The 'animate' option makes each plot write in place rather than scrolling */
+    if (png_state.animate)
+	fprintf(gpoutfile,  "\033[H");
+
+    /* maximum number of palette colors (256), no truecolor images, fill optimization */
+    if (png_state.TrueColor)
+	gdImageSixel(png_state.image, gpoutfile, 256, FALSE, TRUE);
+    else
+	gdImageSixel(png_state.image, gpoutfile, 16, FALSE, TRUE);
+    gdImageDestroy(png_state.image);
+}
+
+#endif /* TERM_BODY */
+
+#ifdef TERM_TABLE
+
+TERM_TABLE_START(sixelgd_driver)
+    "sixelgd", "sixel using libgd and TrueType fonts",
+    GREG_XMAX, GREG_YMAX, PNG_VCHAR, PNG_HCHAR,
+    PNG_TICSIZE, PNG_TICSIZE, PNG_options, PNG_init, PNG_reset,
+    SIXELGD_text, null_scale, PNG_graphics, PNG_move, PNG_vector,
+    PNG_linetype, PNG_put_text, PNG_text_angle,
+    PNG_justify_text, PNG_point, do_arrow, PNG_set_font,
+    PNG_pointsize,
+    TERM_CAN_MULTIPLOT|TERM_BINARY|TERM_ALPHA_CHANNEL|TERM_LINEWIDTH|TERM_FONTSCALE,
+    0 /*suspend*/, 0 /*resume*/,
+    PNG_boxfill,
+    PNG_linewidth,
+#ifdef USE_MOUSE
+    0, 0, 0, 0, 0, /* no mouse support */
+#endif
+    PNG_make_palette,
+    0, /* previous_palette() ... no, single array of 256 colours for PNG */
+    PNG_set_color,
+    PNG_filled_polygon,
+    PNG_image,
+    ENHGD_OPEN, ENHGD_FLUSH, do_enh_writec,
+    NULL,		/* layering */
+    NULL,		/* path */
+    0.0,		/* tscale */
+    NULL		/* hypertext */
+#ifdef EAM_BOXED_TEXT
+    , ENHGD_boxed_text
+#endif
+TERM_TABLE_END(sixelgd_driver)
+
+#undef LAST_TERM
+#define LAST_TERM sixelgd_driver
+
+#endif /* TERM_TABLE */
+#endif /* TERM_PROTO_ONLY */
+
+
+#ifdef TERM_HELP
+START_HELP(sixelgd)
+"1 sixelgd",
+"?commands set terminal sixelgd",
+"?set terminal sixelgd",
+"?set term sixelgd",
+"?terminal sixelgd",
+"?term sixelgd",
+"?sixelgd",
+" Syntax:",
+"       set terminal sixelgd",
+"              {{no}enhanced}",
+"              {{no}transparent} {rounded|butt}",
+"              {linewidth <lw>} {dashlength <dl>}",
+"              {tiny | small | medium | large | giant}",
+"              {font \"<face> {,<pointsize>}\"} {fontscale <scale>}",
+"              {size <x>,<y>} {{no}crop} {animate}",
+"              {background <rgb_color>}",
+"",
+" The `sixel` output format was originally used by DEC terminals and printers.",
+" This driver produces a sixel output stream by converting a PNG image created",
+" internally using the gd library. The sixel output stream can be viewed in the",
+" terminal as it is created or it can be written to a file so that it can be",
+" replayed later by echoing the file to the terminal.",
+"",
+" The `animate` option resets the cursor position to the terminal top left at",
+" the start of every plot so that successive plots overwrite the same area on",
+" the screen rather than having earlier plots scroll off the top. This may be",
+" desirable in order to create an in-place animation.",
+"",
+" `transparent` instructs the driver to make the background color transparent.",
+" Default is `notransparent`.",
+"",
+" The `linewidth` and `dashlength` options are scaling factors that affect all",
+" lines drawn, i.e. they are multiplied by values requested in various drawing",
+" commands.",
+"",
+" By default the sixel output uses 16 indexed colors. The `truecolor` option",
+" instead creates a TrueColor png image that is mapped down onto 256 colors",
+" in the output sixel image. Transparent fill styles require the `truecolor`",
+" option. See `fillstyle`.",
+" A `transparent` background is possible in either indexed or TrueColor images.",
+"",
+" `butt` instructs the driver to use a line drawing method that does",
+" not overshoot the desired end point of a line.  This setting is only",
+" applicable for line widths greater than 1.  This setting is most useful when",
+" drawing horizontal or vertical lines.  Default is `rounded`.",
+"",
+" The details of font selection are complicated.",
+" For more information please see `fonts`.",
+"",
+" The output plot size <x,y> is given in pixels---it defaults to 640x480.",
+" Please see additional information under `canvas` and `set size`.",
+" Blank space at the edges of the finished plot may be trimmed using the `crop`",
+" option, resulting in a smaller final image size. Default is `nocrop`."
+"",
+" The terminal has been sucessfully tested with the xterm, mlterm and mintty",
+" terminals.  The later two support the `truecolor` mode using 256 sixel",
+" colors out of box. Distributed copies of xterm may or may not have been",
+" configured to support sixel graphics and 256 colors."
+END_HELP(sixelgd)
+#endif /* TERM_HELP */
+#endif /* WITH_GD_SIXEL */

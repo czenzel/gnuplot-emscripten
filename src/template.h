@@ -1,5 +1,5 @@
 /*
- * $Id: template.h,v 1.4 2004/04/13 17:24:02 broeker Exp $
+ * $Id: template.h,v 1.3 2000/10/31 19:59:31 joze Exp $
  */
 
 /* GNUPLOT - template.h */

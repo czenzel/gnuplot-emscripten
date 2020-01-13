@@ -1,5 +1,5 @@
 /*
- * $Id: getcolor.h,v 1.11 2012/10/30 04:43:42 sfeam Exp $
+ * $Id: getcolor.h,v 1.10 2010/10/06 00:19:50 sfeam Exp $
  */
 
 /* GNUPLOT - getcolor.h */
@@ -30,7 +30,6 @@ enum color_models_id {
     C_MODEL_RGB = 'r',
     C_MODEL_HSV = 'h',
     C_MODEL_CMY = 'c',
-    C_MODEL_YIQ = 'y',
     C_MODEL_XYZ = 'x'
 };
 

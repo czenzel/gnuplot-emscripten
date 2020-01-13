@@ -1,7 +1,3 @@
-/* Hello, Emacs: this is -*-C-*- !
- * $Id: post.trm,v 1.288.2.3 2016/08/17 17:09:49 sfeam Exp $
- */
-
 /* GNUPLOT - post.trm */
 
 /*[
@@ -76,6 +72,10 @@
  *
  * Christoph Bersch Nov 2011 (cvs Apr 2013): Add support for Level 3 /FlateDecode 
  * filter for plotstyle 'with image'.
+ *
+ * Ethan Merritt Sep 2016:  Support rotatation of boxed text, including text
+ * strings using the glyphshow mechanism.  Special-case the 'minus sign' glyph
+ * at U+2212 by unconditionally mapping it to /minus.
  */
 
 #include "driver.h"
@@ -136,6 +136,7 @@ TERM_PUBLIC void PS_layer __PROTO((t_termlayer syncpoint));
 #ifdef EAM_BOXED_TEXT
 TERM_PUBLIC void ENHPS_boxed_text __PROTO((unsigned int, unsigned int, int));
 #endif
+static int PS_in_textbox = 0;
 
 #endif /* TERM_PROTO */
 
@@ -198,6 +199,7 @@ typedef struct ps_params_t {
     TBOOLEAN solid;
     float dash_length;
     float linewidth_factor;
+    float pointscale_factor;
     TBOOLEAN duplex_option;           /* one of duplex or simplex specified? */
     TBOOLEAN duplex_state;
     TBOOLEAN rounded;                 /* rounded linecaps and linejoins */
@@ -218,7 +220,7 @@ typedef struct ps_params_t {
 
 #define POST_PARAMS_DEFAULT { \
     PSTERM_POSTSCRIPT, 50, 50, \
-    PSTERM_LANDSCAPE, FALSE, FALSE, FALSE, FALSE, FALSE, 1.0, 1.0, FALSE, \
+    PSTERM_LANDSCAPE, FALSE, FALSE, FALSE, FALSE, FALSE, 1.0, 1.0, 1.0, FALSE, \
     FALSE, FALSE, FALSE, NULL, "Helvetica", 14., 1., FALSE, FALSE, 2000, 0.003, \
     FALSE, TRUE, FALSE, {-1.,-1.,-1.} \
 }
@@ -228,7 +230,7 @@ static const ps_params_t post_params_default = POST_PARAMS_DEFAULT;
 
 #define EPSLATEX_PARAMS_DEFAULT { \
     PSTERM_EPSLATEX, 50, 50, \
-    PSTERM_EPS, FALSE, FALSE, FALSE, TRUE, FALSE, 1.0, 1.0, FALSE, \
+    PSTERM_EPS, FALSE, FALSE, FALSE, TRUE, FALSE, 1.0, 1.0, 1.0, FALSE, \
     FALSE, FALSE, FALSE, NULL, "", 11., 1., TRUE, FALSE, 2000, 0.003, \
     FALSE, FALSE, FALSE, {-1.,-1.,-1.} \
 }
@@ -237,7 +239,7 @@ static const ps_params_t epslatex_params_default = EPSLATEX_PARAMS_DEFAULT;
 
 #define PSLATEX_PARAMS_DEFAULT { \
     PSTERM_PSLATEX, 0, 0, \
-    PSTERM_EPS, FALSE, FALSE, FALSE, TRUE, FALSE, 1.0, 1.0, FALSE, \
+    PSTERM_EPS, FALSE, FALSE, FALSE, TRUE, FALSE, 1.0, 1.0, 1.0, FALSE, \
     FALSE, FALSE, FALSE, NULL, "", 0., 1., FALSE, TRUE, 2000, 0.003, \
     FALSE, FALSE, FALSE, {-1.,-1.,-1.} \
 }
@@ -246,7 +248,7 @@ static const ps_params_t pslatex_params_default = PSLATEX_PARAMS_DEFAULT;
 
 #define PSTEX_PARAMS_DEFAULT { \
     PSTERM_PSTEX, 0, 0, \
-    PSTERM_EPS, FALSE, FALSE, FALSE, TRUE, FALSE, 1.0, 1.0, FALSE, \
+    PSTERM_EPS, FALSE, FALSE, FALSE, TRUE, FALSE, 1.0, 1.0, 1.0, FALSE, \
     FALSE, FALSE, FALSE, NULL, "", 0., 1., FALSE, TRUE, 2000, 0.003, \
     FALSE, FALSE, FALSE, {-1.,-1.,-1.} \
 }
@@ -268,8 +270,8 @@ static void PS_skip_image __PROTO((int bytes, int x0, int y0, int dx, int dy));
 static void PS_dump_header_to_file __PROTO((char *name));
 #endif
 
-static float ps_fontsize;
-static float ps_fontsize_previous;
+static float ps_fontsize = 14.;
+static float ps_fontsize_previous = -1.;
 
 /* for enhanced mode, we keep a separate font name and size, which
  * is restored to the default value on font of ""
@@ -323,16 +325,29 @@ static const char GPFAR * GPFAR ENHPS_header[] = {
 /*	[<fontname (a string)> <fontsize> <vertical offset> <width significant?> <printed?> <overprint> <text string>]  */
 /* EAM Mar 2004 - Add in a special case overprint 3 = save, overprint 4 = restore */
 /* EAM Nov 2007 - Accommodate UTF-8 support (Gshow) */
+/* EAM Sep 2016 - rotatable textbox */
 
+"/Metrics {ExtendTextBox Gswidth} def\n",
+"/Lwidth {currentpoint stroke M 0 vshift R Metrics} def\n",
+"/Rwidth {currentpoint stroke M dup stringwidth pop neg vshift R Metrics} def\n",
+"/Cwidth {currentpoint stroke M dup stringwidth pop -2 div vshift R Metrics} def\n",
+"/GLwidth {currentpoint stroke M 0 vshift R {ExtendTextBox} forall} def\n",
+"/GRwidth {currentpoint stroke M dup Gwidth vshift R {ExtendTextBox} forall} def\n",
+"/GCwidth {currentpoint stroke M dup Gwidth 2 div vshift R {ExtendTextBox} forall} def\n",
+"/GLwidth2 {0 Gwidth AddGlyphWidth} def\n",
+"/GRwidth2 {Gwidth -1 mul 0 AddGlyphWidth} def\n",
+"/GCwidth2 {Gwidth 2 div dup -1 mul AddGlyphWidth} def\n",
+"/AddGlyphWidth { dup TBx2 gt {userdict /TBx2 3 -1 roll put} {pop} ifelse\n",
+"                 dup TBx1 lt {userdict /TBx1 3 -1 roll put} {pop} ifelse } def\n",
 "/MFshow {\n",
 "   { dup 5 get 3 ge\n",	/* EAM test for overprint 3 or 4 */
 "     { 5 get 3 eq {gsave} {grestore} ifelse }\n", /* EAM */
 "     {dup dup 0 get findfont exch 1 get scalefont setfont\n",
 "     [ currentpoint ] exch dup 2 get 0 exch R dup 5 get 2 ne {dup dup 6\n",
-"     get exch 4 get {textshow} {stringwidth pop 0 R} ifelse }if dup 5 get 0 eq\n",
+"     get exch 4 get {textshow} {Metrics pop 0 R} ifelse }if dup 5 get 0 eq\n",
 "     {dup 3 get {2 get neg 0 exch R pop} {pop aload pop M} ifelse} {dup 5\n",
-"     get 1 eq {dup 2 get exch dup 3 get exch 6 get stringwidth pop -2 div\n",
-"     dup 0 R} {dup 6 get stringwidth pop -2 div 0 R 6 get\n",
+"     get 1 eq {dup 2 get exch dup 3 get exch 6 get Gswidth pop -2 div\n",
+"     dup 0 R} {dup 6 get Gswidth pop -2 div 0 R 6 get\n",
 "     textshow 2 index {aload pop M neg 3 -1 roll neg R pop pop} {pop pop pop\n",
 "     pop aload pop M} ifelse }ifelse }ifelse }\n",
 "     ifelse }\n", /* EAM */
@@ -373,23 +388,24 @@ NULL
 #ifdef EAM_BOXED_TEXT
     static const char GPFAR psi4[] = "\
 %%\n\
-%% Support for boxed text - Ethan A Merritt May 2005\n%%\n\
+%% Support for boxed text - Ethan A Merritt Sep 2016\n%%\n\
 /InitTextBox { userdict /TBy2 3 -1 roll put userdict /TBx2 3 -1 roll put\n\
            userdict /TBy1 3 -1 roll put userdict /TBx1 3 -1 roll put\n\
 	   /Boxing true def } def\n\
-/ExtendTextBox { Boxing\n\
-    { gsave dup false charpath pathbbox\n\
+/ExtendTextBox { dup type /stringtype eq\n\
+    { Boxing { gsave dup false charpath pathbbox\n\
       dup TBy2 gt {userdict /TBy2 3 -1 roll put} {pop} ifelse\n\
       dup TBx2 gt {userdict /TBx2 3 -1 roll put} {pop} ifelse\n\
       dup TBy1 lt {userdict /TBy1 3 -1 roll put} {pop} ifelse\n\
       dup TBx1 lt {userdict /TBx1 3 -1 roll put} {pop} ifelse\n\
-      grestore } if } def\n\
+      grestore } if }\n\
+    {} ifelse} def\n\
 /PopTextBox { newpath TBx1 TBxmargin sub TBy1 TBymargin sub M\n\
                TBx1 TBxmargin sub TBy2 TBymargin add L\n\
 	       TBx2 TBxmargin add TBy2 TBymargin add L\n\
 	       TBx2 TBxmargin add TBy1 TBymargin sub L closepath } def\n\
 /DrawTextBox { PopTextBox stroke /Boxing false def} def\n\
-/FillTextBox { gsave PopTextBox 1 1 1 setrgbcolor fill grestore /Boxing false def} def\n\
+/FillTextBox { gsave PopTextBox fill grestore /Boxing false def} def\n\
 0 0 0 0 InitTextBox\n\
 /TBxmargin 20 def\n\
 /TBymargin 20 def\n\
@@ -400,13 +416,13 @@ NULL
 
 /* external/internal prologue files machinery */
 #if defined(GNUPLOT_PS_DIR)
-# if defined(_Windows)
+# if defined(_WIN32)
 #  include "win/winmain.h"
 # elif defined(OS2)
 #  define INCL_DOSPROCESS
 #  define INCL_DOSMODULEMGR
 #  include <os2.h>
-# endif /* _Windows || OS2 */
+# endif /* _WIN32 || OS2 */
 #else /* GNUPLOT_PS_DIR */
 # include "PostScript/prologues.h"
 #endif /* GNUPLOT_PS_DIR */
@@ -419,7 +435,7 @@ static struct PS_FontName {
 	struct PS_FontName *next;
 } *PS_DocFonts = NULL;
 
-static char PS_default_font[MAX_ID_LEN+1] = {'H','e','l','v','e','t','i','c','a',',','1','4','\0'};
+static char PS_default_font[2*MAX_ID_LEN] = {'H','e','l','v','e','t','i','c','a',',','1','4','\0'};
 
 /* given a font, look in store to see if it is there already
  * if so, return NULL. If not, reencode it if allowed to, otherwise
@@ -537,7 +553,7 @@ enum PS_id {
     PS_EPSF, PS_DEFAULT, PS_ENHANCED, PS_NOENHANCED,
     PS_LATEX, EPSLATEX_STANDALONE, EPSLATEX_INPUT,
     PS_MONOCHROME, PS_COLOR, PS_BLACKTEXT, PS_COLORTEXT,
-    PS_SOLIDE, PS_DASHED, PS_DASHLENGTH, PS_LINEWIDTH,
+    PS_SOLIDE, PS_DASHED, PS_DASHLENGTH, PS_LINEWIDTH, PS_POINTSCALE,
     PS_SIMPLEX, PS_DUPLEX, PS_DEFAULTPLEX,
     PS_ROUNDED, PS_NOROUNDED, PS_CLIP, PS_NOCLIP, PS_FONTFILE, PS_NOFONTFILES,
     PS_PALFUNCPARAM,
@@ -570,6 +586,8 @@ static struct gen_table PS_opts[] =
     { "dl", PS_DASHLENGTH },
     { "linew$idth", PS_LINEWIDTH },
     { "lw", PS_LINEWIDTH },
+    { "pointscale", PS_POINTSCALE },
+    { "ps", PS_POINTSCALE },
     { "size", PS_SIZE },
     { "si$mplex", PS_SIMPLEX },
     { "du$plex", PS_DUPLEX },
@@ -614,6 +632,7 @@ PS_options()
     TBOOLEAN set_orientation = FALSE, set_enhanced = FALSE, set_plex = FALSE;
     TBOOLEAN set_level = FALSE, set_color = FALSE;
     TBOOLEAN set_dashlen = FALSE, set_linewidth = FALSE, set_round = FALSE;
+    TBOOLEAN set_pointscale = FALSE;
     TBOOLEAN set_clip = FALSE, set_palfunc = FALSE, set_colortext = FALSE;
     TBOOLEAN set_standalone = FALSE, set_epslheader = FALSE;
     TBOOLEAN set_pslrotate = FALSE, set_pslauxfile = FALSE;
@@ -661,8 +680,7 @@ PS_options()
 	    }
 	    c_token++;
 	    if (!END_OF_COMMAND) 
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	}
     }
 
@@ -680,40 +698,35 @@ PS_options()
 	switch(lookup_table(&PS_opts[0],c_token)) {
 	case PS_PORTRAIT:
 	    if (set_orientation || ps_params->terminal != PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_orientation = TRUE;
 	    ps_params->psformat = PSTERM_PORTRAIT;
 	    c_token++;
 	    break;
 	case PS_LANDSCAPE:
 	    if (set_orientation || ps_params->terminal != PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_orientation = TRUE;
 	    ps_params->psformat = PSTERM_LANDSCAPE;
 	    c_token++;
 	    break;
 	case PS_EPSF:
 	    if (set_orientation || ps_params->terminal != PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_orientation = TRUE;
 	    ps_params->psformat = PSTERM_EPS;
 	    c_token++;
 	    break;
 	case PS_LEVEL1:
 	    if (set_level)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_level = TRUE;
 	    ps_params->level1 = TRUE;
 	    c_token++;
 	    break;
 	case PS_LEVELDEFAULT:
 	    if (set_level)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_level = TRUE;
 	    ps_params->level1 = FALSE;
 	    ps_params->level3 = FALSE;
@@ -721,25 +734,21 @@ PS_options()
 	    break;
 	case PS_LEVEL3:
 	    if (set_level)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_level = TRUE;
 	    ps_params->level3 = TRUE;
 #ifndef HAVE_DEFLATE_ENCODER
-	    int_error(c_token,
-		     "level3 output requires libgd or libcairo");
+	    int_error(c_token, "level3 output requires libgd or libcairo");
 #endif
 	    c_token++;
 	    break;
 	case PS_DEFAULT:
-	    int_error(c_token,
-		      "extraneous argument in set terminal %s",term->name);
+	    goto PS_options_error;
 	    c_token++;
 	    break;
 	case PS_ENHANCED:
 	    if (set_enhanced || ps_params->terminal != PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_enhanced = TRUE;
 	    term->put_text = ENHPS_put_text;
 	    term->set_font = ENHPS_set_font;
@@ -748,8 +757,7 @@ PS_options()
 	    break;
 	case PS_NOENHANCED:
 	   if (set_enhanced || ps_params->terminal != PSTERM_POSTSCRIPT)
-	        int_error(c_token,
-	                  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_enhanced = TRUE;
 	    term->put_text = PS_put_text;
 	    term->set_font = PS_set_font;
@@ -759,16 +767,14 @@ PS_options()
 #ifdef PSLATEX_DRIVER
 	case EPSLATEX_STANDALONE:
 	    if (set_standalone || ps_params->terminal != PSTERM_EPSLATEX)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_standalone = TRUE;
 	    ps_params->epslatex_standalone = TRUE;
 	    ++c_token;
 	    break;
 	case EPSLATEX_INPUT:
 	    if (set_standalone || ps_params->terminal != PSTERM_EPSLATEX)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_standalone = TRUE;
 	    ps_params->epslatex_standalone = FALSE;
 	    ++c_token;
@@ -776,8 +782,7 @@ PS_options()
 
 	case EPSLATEX_HEADER:
 	    if (set_epslheader || ps_params->terminal != PSTERM_EPSLATEX)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_epslheader = TRUE;
 	    ++c_token;
 	    free(epslatex_header);
@@ -790,8 +795,7 @@ PS_options()
 
 	case EPSLATEX_NOHEADER:
 	    if (set_epslheader || ps_params->terminal != PSTERM_EPSLATEX)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_epslheader = TRUE;
 	    free(epslatex_header);
 	    epslatex_header = NULL;
@@ -801,8 +805,7 @@ PS_options()
 	case PSLATEX_ROTATE:
 	    if (set_pslrotate || ((ps_params->terminal != PSTERM_PSLATEX) &&
 				  (ps_params->terminal != PSTERM_PSTEX)))
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_pslrotate = TRUE;
 	    ps_params->rotate = TRUE;
 	    ++c_token;
@@ -810,8 +813,7 @@ PS_options()
 	case PSLATEX_NOROTATE:
 	    if (set_pslrotate || ((ps_params->terminal != PSTERM_PSLATEX) &&
 				  (ps_params->terminal != PSTERM_PSTEX)))
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_pslrotate = TRUE;
 	    ps_params->rotate = FALSE;
 	    ++c_token;
@@ -820,8 +822,7 @@ PS_options()
 	    if (set_pslauxfile ||
 		((ps_params->terminal == PSTERM_POSTSCRIPT) ||
 		 (ps_params->terminal == PSTERM_EPSLATEX)))
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_pslauxfile = TRUE;
 	    ps_params->useauxfile = TRUE;
 	    c_token++;
@@ -830,16 +831,14 @@ PS_options()
 	    if (set_pslauxfile ||
 		((ps_params->terminal == PSTERM_POSTSCRIPT) ||
 		 (ps_params->terminal == PSTERM_EPSLATEX)))
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_pslauxfile = TRUE;
 	    ps_params->useauxfile = FALSE;
 	    c_token++;
 	    break;
 	case PSLATEX_OLDSTYLE:
 	    if (set_psloldstyle || ps_params->terminal == PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_psloldstyle = TRUE;
 	    ps_params->oldstyle = TRUE;
 	    if (ps_params->terminal == PSTERM_EPSLATEX)
@@ -848,8 +847,7 @@ PS_options()
 	    break;
 	case PSLATEX_NEWSTYLE:
 	    if (set_psloldstyle || ps_params->terminal == PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_psloldstyle = TRUE;
 	    ps_params->oldstyle = FALSE;
 	    c_token++;
@@ -857,8 +855,7 @@ PS_options()
 #endif
 	case PS_MONOCHROME:
 	    if (set_color)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_color = TRUE;
 	    ps_params->color = FALSE;
 	    term->flags |= TERM_MONOCHROME;
@@ -866,8 +863,7 @@ PS_options()
 	    break;
 	case PS_COLOR:
 	    if (set_color)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_color = TRUE;
 	    ps_params->color = TRUE;
 	    term->flags &= ~TERM_MONOCHROME;
@@ -876,8 +872,7 @@ PS_options()
 	case PS_BLACKTEXT:
 	    if (set_colortext || ((ps_params->terminal != PSTERM_POSTSCRIPT) &&
 				  (ps_params->terminal != PSTERM_EPSLATEX)))
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_colortext = TRUE;
 	    ps_params->blacktext = TRUE;
 	    c_token++;
@@ -885,8 +880,7 @@ PS_options()
 	case PS_COLORTEXT:
 	    if (set_colortext || ((ps_params->terminal != PSTERM_POSTSCRIPT) &&
 				  (ps_params->terminal != PSTERM_EPSLATEX)))
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_colortext = TRUE;
 	    ps_params->blacktext = FALSE;
 	    c_token++;
@@ -899,8 +893,7 @@ PS_options()
 	    break;
 	case PS_DASHLENGTH:
 	    if (set_dashlen)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_dashlen = TRUE;
 	    c_token++;
 	    ps_params->dash_length = real_expression();
@@ -909,18 +902,25 @@ PS_options()
 	    break;
 	case PS_LINEWIDTH:
 	    if (set_linewidth)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_linewidth = TRUE;
 	    c_token++;
 	    ps_params->linewidth_factor = real_expression();
 	    if (ps_params->linewidth_factor <= 0.0)
 		ps_params->linewidth_factor = 1.0;
 	    break;
+	case PS_POINTSCALE:
+	    if (set_pointscale)
+		goto PS_options_error;
+	    set_pointscale = TRUE;
+	    c_token++;
+	    ps_params->pointscale_factor = real_expression();
+	    if (ps_params->pointscale_factor <= 0.0)
+		ps_params->pointscale_factor = 1.0;
+	    break;
 	case PS_SIMPLEX:
 	    if (set_plex || ps_params->terminal != PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_plex = TRUE;
 	    ps_params->duplex_state  = FALSE;
 	    ps_params->duplex_option = TRUE;
@@ -928,8 +928,7 @@ PS_options()
 	    break;
 	case PS_DUPLEX:
 	    if (set_plex || ps_params->terminal != PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_plex = TRUE;
 	    ps_params->duplex_state  = TRUE;
 	    ps_params->duplex_option = TRUE;
@@ -937,52 +936,46 @@ PS_options()
 	    break;
 	case PS_DEFAULTPLEX:
 	    if (set_plex || ps_params->terminal != PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_plex = TRUE;
 	    ps_params->duplex_option = FALSE;
 	    c_token++;
 	    break;
 	case PS_ROUNDED:
 	    if (set_round)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_round = TRUE;
 	    ps_params->rounded = TRUE;
 	    c_token++;
 	    break;
 	case PS_NOROUNDED:
 	    if (set_round)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_round = TRUE;
 	    ps_params->rounded = FALSE;
 	    c_token++;
 	    break;
 	case PS_CLIP:
 	    if (set_clip)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_clip = TRUE;
 	    ps_params->clipped = TRUE;
 	    c_token++;
 	    break;
 	case PS_NOCLIP:
 	    if (set_clip)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_clip = TRUE;
 	    ps_params->clipped = FALSE;
 	    c_token++;
 	    break;
 	case PS_FONTSCALE:
 	    if (set_fontscale)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_fontscale = TRUE;
 	    c_token++;
 	    ps_params->fontscale = END_OF_COMMAND ? -1 : real_expression();
-	    if (ps_params->fontscale < 0.0)
+	    if (ps_params->fontscale <= 0)
 		ps_params->fontscale = 1.0;
 	    break;
 	case PS_FONTFILE: {
@@ -990,8 +983,7 @@ PS_options()
 	    char *fontfilename = NULL;
 	    c_token++;
 	    if (ps_params->terminal != PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 
 	    if (equals(c_token, "add"))
 		c_token++;
@@ -1078,8 +1070,7 @@ PS_options()
 	}
 	case PS_NOFONTFILES:
 	    if (ps_params->terminal != PSTERM_POSTSCRIPT)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    while (ps_params->first_fontfile != NULL)
 		delete_ps_fontfile((struct ps_fontfile_def *) NULL,
 				   ps_params->first_fontfile);
@@ -1108,8 +1099,7 @@ PS_options()
 	    break;
 	case PS_PALFUNCPARAM:
 	    if (set_palfunc)
-		int_error(c_token,
-			  "extraneous argument in set terminal %s",term->name);
+		goto PS_options_error;
 	    set_palfunc = TRUE;
 	    ++c_token;
 	    ps_params->palfunc_samples = int_expression();
@@ -1146,9 +1136,7 @@ PS_options()
 	default:
 	    if ((s = try_to_get_string())) {
 		if (set_font)
-		    int_error(c_token,
-			      "extraneous argument in set terminal %s",
-			      term->name);
+		    goto PS_options_error;
 		set_font = TRUE;
 		if ((ps_params->terminal == PSTERM_POSTSCRIPT) ||
 		    (ps_params->terminal == PSTERM_EPSLATEX)) {
@@ -1175,16 +1163,22 @@ PS_options()
 			      term->name, "of font name");
 	    } else {
 		if (set_fontsize)
-		    int_error(c_token,
-			      "extraneous argument in set terminal %s",
-			      term->name);
+		    goto PS_options_error;
 		set_fontsize = TRUE;
 		/* We have font size specified */
 		ps_params->fontsize = real_expression();
+		if (ps_params->fontsize <= 0)
+		    ps_params->fontsize = 14;
 	    }
 	    break;
 	}
     }
+
+    /* Sanity checks on fontsize */
+    if (ps_params->fontsize > 1000.)
+	ps_params->fontsize = 100.;
+    if (ps_params->fontsize <= 0.)
+	ps_params->fontsize = 14.;
 
     switch (ps_params->terminal) {
     case PSTERM_POSTSCRIPT:
@@ -1206,7 +1200,7 @@ PS_options()
 	term->h_char = (unsigned int)(ps_fontsize*PS_SCF*5/10);
     else
 	term->h_char = (unsigned int)(ps_fontsize*PS_SCF*6/10);
-    sprintf(PS_default_font,"%s,%g",ps_params->font,ps_fontsize);
+    snprintf(PS_default_font, sizeof(PS_default_font)-1, "%s, %.2g", ps_params->font, ps_fontsize);
 
     if (ps_params->terminal == PSTERM_POSTSCRIPT) {
 	if (ps_params->first_fontfile) {
@@ -1251,12 +1245,13 @@ PS_options()
 	term_options[0] = '\0';
 
     sprintf(tmp_term_options,"   %s %s %s \\\n\
-   dashlength %.1f linewidth %.1f %s %s \\\n",
+   dashlength %.1f linewidth %.1f pointscale %.1f %s %s \\\n",
 	    ps_params->level1 ? "level1" : (ps_params->level3 ? "level3" : "leveldefault"),
 	    ps_params->color ? "color" : "monochrome",
 	    ps_params->blacktext ? "blacktext" : "colortext",
 	    ps_params->dash_length,
 	    ps_params->linewidth_factor,
+	    ps_params->pointscale_factor,
 	    ps_params->rounded ? "rounded" : "butt",
 	    ps_params->clipped ? "clip" : "noclip");
     strcat(term_options,tmp_term_options);
@@ -1324,7 +1319,11 @@ PS_options()
 
     sprintf(tmp_term_options," fontscale %3.1f ",ps_params->fontscale);
     strcat(term_options,tmp_term_options);
+    return;
 
+PS_options_error:
+    int_error(c_token, "extraneous argument in set terminal %s", term->name);
+    return;
 }
 
 /* store settings passed to common_init() for use in PS_graphics()
@@ -1644,7 +1643,6 @@ SDict begin [\n\
   /Title (%s)\n\
   /Subject (gnuplot plot)\n\
   /Creator (gnuplot %s patchlevel %s)\n\
-  /Author (%s)\n\
 %%  /Producer (gnuplot)\n\
 %%  /Keywords ()\n\
   /CreationDate (%s)\n\
@@ -1807,18 +1805,11 @@ end\n\
 
     /* HH: print pdf information interpreted by ghostscript/acrobat */
     {
-	char *username=getusername();
-	char *username2=PS_escape_string(username,"()\\");
 	char *outstr2=PS_escape_string(outstr,"()\\");
 	fprintf(gppsfile, psi3,
 		outstr2?outstr2:"",
 		gnuplot_version, gnuplot_patchlevel,
-		username2?username2:"", 
 		timedate);
-	if (username)
-	    free(username);
-	if (username2)
-	    free(username2);
 	if (outstr2)
 	    free(outstr2);
     }
@@ -1829,12 +1820,6 @@ end\n\
 #else
     fputs("/textshow { Gshow } def\n",gppsfile);
 #endif
-
-    /* version 5.0.2:  These revised definitions are now in prologue.ps but we */
-    /* add them here also so that updating to 5.0.2 does not break previous    */
-    /* local customizations of the original version 5.0 prologue.ps. */
-    fputs("% redundant definitions for compatibility with prologue.ps older than 5.0.2\n", gppsfile);
-    fputs("/LTB {BL [] LCb DL} def\n/LTb {PL [] LCb DL} def\n", gppsfile);
 
     fputs("end\n", gppsfile);
     fputs("%%EndProlog\n", gppsfile);
@@ -2103,6 +2088,7 @@ PS_linewidth (double linewidth)
 TERM_PUBLIC void
 PS_pointsize (double ptsize)
 {
+    ptsize *= ps_params->pointscale_factor;
     fprintf(gppsfile, "%.3f UP\n", ptsize);
 
 /*
@@ -2191,14 +2177,14 @@ PS_vector(unsigned int x, unsigned int y)
     /* Ghostscript has a "pile-up of rounding errors" bug: a sequence of many
      * rmove's or rlineto's does not yield the same line as move's or lineto's.
      * Therefore, we periodically force an update of the absolute position.
-     * There was a case when 400 rlineto's were too much, so let's go a little
-     * bit higher than the default function sampling rate in gnuplot.
+     * There was a case when 400 rlineto's were too much, so let's set the limit
+     * just above the 242 segments used by do_arc() to draw a full circle.
      * This runs into a second ghostscript bug, that mixing relative and absolute
      * lineto with no intervening 'stroke' is ridiculously slow to render.
      * So we stroke the partial line, update the position in absolute terms,
      * then continue.  This whole section can go away if ghostscript/gv is fixed.
      */
-#define MAX_REL_PATHLEN 105
+#define MAX_REL_PATHLEN 250
     if (ps_path_count >= MAX_REL_PATHLEN) {
 	fprintf(gppsfile, "stroke %d %d M\n", x, y);
 	ps_path_count = 1;
@@ -2218,57 +2204,106 @@ PS_put_text(unsigned int x, unsigned int y, const char *str)
 #define PS_GLYPH 2
     unsigned long ch;
 
-    if (!str && !strlen(str))
+    if (!str || !strlen(str))
 	return;
-    PS_move(x,y);
+
+    if (PS_in_textbox > 0) {
+	int save_ang = ps_ang;
+	PS_in_textbox = -1;
+	/* Write once with no rotation and no actual "show" command */
+	ps_ang = 0;
+	PS_put_text(0, 0, str);
+	/* Now restore the angle and the "show" command and fall through */
+	fprintf(gppsfile,"/Boxing false def\n");
+	fprintf(gppsfile,"grestore\n");
+	ps_ang = save_ang;
+	PS_in_textbox = 1;
+    }
+
+    if (PS_in_textbox >= 0)
+	PS_move(x,y);
+
     if (ps_ang != 0)
 	fprintf(gppsfile,"currentpoint gsave translate %d rotate 0 0 M\n", ps_ang);
+    else if (PS_in_textbox > 0)
+	fprintf(gppsfile,"gsave currentpoint translate\n");
 
     if (encoding == S_ENC_UTF8 && contains8bit(str)) {
 	/* UTF-8 encoding with multibyte characters present */
+	/* Note: uses an intermediate array rather than direct output via fputs so
+	 * that the bounding box (used by boxed text) can be calculated in 2 passes:
+	 *   [char sequence] GLwidth [char sequence] GLwidth2
+	 * First pass updates height, second pass updates width.
+	 * There must surely be some some way to do this in one pass!
+	 */
+	char strarray[MAX_LINE_LEN];
 	int mode = PS_NONE;
+	char *c = strarray;
 
-	putc('[', gppsfile);
+	*c++ = '[';
 
 	for (utf8toulong(&ch, &str); ch != '\0'; utf8toulong(&ch, &str)) {
 	    if (ch < 0x100) {
 		if (mode != PS_TEXT)
-		    putc('(', gppsfile);
+		    *c++ = '(';
 		if (ch == '(' || ch == ')' || ch == '\\')
-		    putc('\\', gppsfile);
-		putc((char)ch, gppsfile);
+		    *c++ = '\\';
+		*c++ = ch;
 		mode = PS_TEXT;
 	    } else {
 		int i;
 		if (mode == PS_TEXT)
-		    putc(')', gppsfile);
-		putc('/', gppsfile);
+		    *c++ = ')';
+		*c++ = '/';
 #if (ADOBE_ENCODING_NAMES)
 		for (i = 0; i < psglyphs; i++) {
 		    if (aglist[i].unicode == ch) {
-		    	fputs(aglist[i].glyphname, gppsfile);
+			*c = 0;
+			strcat(c, aglist[i].glyphname);
+			c += strlen(aglist[i].glyphname);
 			break;
 		    }
 		}
 		if (i >= psglyphs) /* Must not have found a glyph name */
 #endif
-		    fprintf(gppsfile, (ch > 0xffff) ? "u%lX" : "uni%04lX", ch);
+		    {
+		    /* Special case for the minus sign emitted by gprintf */
+		    if (ch == 0x2212)
+			sprintf(c, "minus");
+		    else
+			sprintf(c, (ch > 0xffff) ? "u%lX%c" : "uni%04lX%c", ch, 0);
+		    }
+		while (*c) c++;
 		mode = PS_GLYPH;
 	    }
 	}
 
 	if (mode == PS_TEXT)
-	    putc(')', gppsfile);
+	    *c++ = ')';
 
+	*c++ = ']';
+	*c = 0;
 	switch(ps_justify) {
 	    case LEFT :
-		fputs("] GLshow\n", gppsfile);
+		if (PS_in_textbox < 0) {
+		    fprintf(gppsfile,"%s GLwidth\n", strarray);
+		    fprintf(gppsfile,"%s GLwidth2\n", strarray);
+		} else
+		    fprintf(gppsfile,"%s GLshow\n", strarray);
 		break;
 	    case CENTRE :
-		fputs("] GCshow\n", gppsfile);
+		if (PS_in_textbox < 0) {
+		    fprintf(gppsfile,"%s GCwidth\n", strarray);
+		    fprintf(gppsfile,"%s GCwidth2\n", strarray);
+		} else
+		    fprintf(gppsfile,"%s GCshow\n", strarray);
 		break;
 	    case RIGHT :
-		fputs("] GRshow\n", gppsfile);
+		if (PS_in_textbox < 0) {
+		    fprintf(gppsfile,"%s GRwidth\n", strarray);
+		    fprintf(gppsfile,"%s GRwidth2\n", strarray);
+		} else
+		    fprintf(gppsfile,"%s GRshow\n", strarray);
 		break;
 	}
 
@@ -2285,18 +2320,27 @@ PS_put_text(unsigned int x, unsigned int y, const char *str)
 
 	switch(ps_justify) {
 	    case LEFT :
-		fputs(") Lshow\n", gppsfile);
+		if (PS_in_textbox < 0)
+		    fputs(") Lwidth\n", gppsfile);
+		else
+		    fputs(") Lshow\n", gppsfile);
 		break;
 	    case CENTRE :
-		fputs(") Cshow\n", gppsfile);
+		if (PS_in_textbox < 0)
+		    fputs(") Cwidth\n", gppsfile);
+		else
+		    fputs(") Cshow\n", gppsfile);
 		break;
 	    case RIGHT :
-		fputs(") Rshow\n", gppsfile);
+		if (PS_in_textbox < 0)
+		    fputs(") Rwidth\n", gppsfile);
+		else
+		    fputs(") Rshow\n", gppsfile);
 		break;
 	}
     }
 
-    if (ps_ang != 0)
+    if (ps_ang != 0 && (PS_in_textbox == 0))
 	fputs("grestore\n", gppsfile);
     ps_path_count = 0;
     PS_relative_ok = FALSE;
@@ -2346,6 +2390,9 @@ PS_set_font(const char *font)
     name[sep] = NUL;
     for (i=0; i<sep; i++)
 	if (name[i] == ' ') name[i] = '-';
+
+    if (size <= 0)
+	size = ps_fontsize_previous;
 
     /* If TeX is doing the font handling, we don't need to */
     /* write anything into the postscript stream */
@@ -2542,6 +2589,7 @@ ENHPS_OPEN(
 
 	if (!ENHps_opened_string) {
 	    int safelen = strlen(fontname) + 40;
+	    TBOOLEAN show_this = showflag && (PS_in_textbox >= 0);
 	    free(ENHps_opensequence);
 	    ENHps_opensequence = gp_alloc(safelen,"ENHPS_opensequence");
 	    if (!fontname || !*fontname)
@@ -2552,13 +2600,13 @@ ENHPS_OPEN(
 	    snprintf(ENHps_opensequence, safelen, "[(%s) %.1f %.1f %s %s %d ",
 		    fontname, fontsize, base,
 		    widthflag ? "true" : "false",
-		    showflag ? "true" : "false",
+		    show_this ? "true" : "false",
 		    overprint);
 #else
 	    sprintf(ENHps_opensequence, "[(%s) %.1f %.1f %s %s %d ",
 		    fontname, fontsize, base,
 		    widthflag ? "true" : "false",
-		    showflag ? "true" : "false",
+		    show_this ? "true" : "false",
 		    overprint);
 #endif
 	    fprintf(gppsfile, "%s(", ENHps_opensequence);
@@ -2618,7 +2666,12 @@ ENHPS_WRITEC(int c)
 		}
 		if (i >= psglyphs) /* Must not have found a glyph name */
 #endif
-		    fprintf(gppsfile, (wch > 0xffff) ? "u%lX" : "uni%04lX", wch);
+		    {
+		    if (wch == 0x2212)
+			fprintf(gppsfile, "minus");
+		    else
+			fprintf(gppsfile, (wch > 0xffff) ? "u%lX" : "uni%04lX", wch);
+		    }
 		fprintf(gppsfile, "]\n");
 
 		/* Mark string closed */
@@ -2669,7 +2722,8 @@ ENHPS_set_font(const char *font)
 	    PS_RememberFont(ps_enh_font);
 	}
 	ps_enh_fontsize = ps_fontsize;
-	sscanf (font+sep+1,"%f",&ps_enh_fontsize);
+	if (*(font+sep) == ',')
+	    sscanf (font+sep+1,"%f",&ps_enh_fontsize);
     } else {
 	/* return to defaults */
 	strcpy(ps_enh_font, ps_params->font);
@@ -2697,6 +2751,19 @@ ENHPS_put_text(unsigned int x, unsigned int y, const char *str)
 
     PS_FLUSH_PATH;
 
+    if (PS_in_textbox > 0) {
+	int save_ang = ps_ang;
+	PS_in_textbox = -1;
+	/* Write once with no rotation and no actual "show" command */
+	ps_ang = 0;
+	ENHPS_put_text(0, 0, str);
+	/* Now restore the angle and the "show" command and fall through */
+	ps_ang = save_ang;
+	fprintf(gppsfile,"/Boxing false def\n");
+	fprintf(gppsfile,"grestore\n");
+	PS_in_textbox = 1;
+    }
+
     /* FIXME: if there are no magic characters, we should just be able
      * punt the string to PS_put_text(), which will give shorter
      * ps output [eg tics and stuff rarely need extra processing],
@@ -2711,11 +2778,13 @@ ENHPS_put_text(unsigned int x, unsigned int y, const char *str)
      * }
      */
 
-    PS_move(x,y);
+    if (PS_in_textbox >= 0)
+	PS_move(x,y);
 
     if (ps_ang != 0)
-	fprintf(gppsfile,"currentpoint gsave translate %d rotate 0 0 moveto\n",
-		ps_ang);
+	fprintf(gppsfile,"currentpoint gsave translate %d rotate 0 0 moveto\n", ps_ang);
+    else if (PS_in_textbox > 0)
+	fprintf(gppsfile,"gsave currentpoint translate\n");
 
     fputs("[ ", gppsfile);
 
@@ -2768,10 +2837,18 @@ ENHPS_put_text(unsigned int x, unsigned int y, const char *str)
 	break;
     }
 
-    if (ps_ang != 0)
+    if (ps_ang != 0 && (PS_in_textbox == 0))
 	fputs("grestore\n", gppsfile);
     ps_path_count = 0;
     PS_relative_ok = FALSE;
+
+    /* Apr 2018: Unlike other terminals, this leaves the last-used font
+     * in the enhanced text string active.  For a long time we dealt with
+     * this by calling term->set_font("") in ignore_enhanced(), but that
+     * introduces other side effects and has no benefit (I think!) for
+     * other terminals.  Try doing it here instead.
+     */
+    PS_set_font("");
 }
 
 static void
@@ -2815,16 +2892,27 @@ ENHPS_boxed_text __PROTO((unsigned int x, unsigned int y, int option))
 {
     switch (option) {
     case TEXTBOX_INIT:
-	/* Initialize bounding box for the text string */
-	fprintf(gppsfile,"%d %d %d %d InitTextBox\n",x,y,x,y);
+	/* Initialize bounding box for the text string drawn at the origin */
+	/* Redefine /textshow so that we update the bounding box without actually writing */
+	fprintf(gppsfile,"%d %d M\n",x,y);
+	fprintf(gppsfile,"currentpoint gsave translate 0 0 moveto\n");
+	fprintf(gppsfile,"0 0 0 0 InitTextBox\n");
+	/* This flags that when we write the string, we must do it twice.
+	 * Once to update the bounding box,
+	 * then rotate,
+	 * the a second time to actually draw the string
+	 */ 
+	PS_in_textbox = 1;
 	break;
     case TEXTBOX_OUTLINE:
 	/* Stroke the outline of the accumulated bounding box */
-	fputs("DrawTextBox\n", gppsfile);
+	fputs("DrawTextBox grestore\n", gppsfile);
+	PS_in_textbox = 0;
 	break;
     case TEXTBOX_BACKGROUNDFILL:
 	/* Fill bounding box with background color */
-	fputs("FillTextBox\n", gppsfile);
+	fputs("FillTextBox grestore\n", gppsfile);
+	PS_in_textbox = 0;
 	break;
     case TEXTBOX_MARGINS:
 	/* Change text margins */
@@ -2884,10 +2972,6 @@ make_color_model_code()
 	"  } ifelse} def\n",
 	"/Constrain {\n",
 	"  dup 0 lt {0 exch pop}{dup 1 gt {1 exch pop} if} ifelse} def\n",
-	"/YIQ2RGB {\n",
-	"  3 copy -1.702 mul exch -1.105 mul add add Constrain 4 1 roll\n",
-	"  3 copy -0.647 mul exch -0.272 mul add add Constrain 5 1 roll\n",
-	"  0.621 mul exch -0.956 mul add add Constrain 3 1 roll } def\n",
 	"/CMY2RGB {",
 	"  1 exch sub exch 1 exch sub 3 2 roll 1 exch sub 3 1 roll exch } def\n",
 	"/XYZ2RGB {",
@@ -2940,9 +3024,6 @@ write_color_space(t_sm_palette *palette)
 	break;
     case C_MODEL_CMY:
 	fputs("(CMY)", gppsfile);
-	break;
-    case C_MODEL_YIQ:
-	fputs("(YIQ)", gppsfile);
 	break;
     case C_MODEL_XYZ:
 	fputs("(XYZ)", gppsfile);
@@ -3130,7 +3211,7 @@ TERM_PUBLIC void PS_set_color (t_colorspec *colorspec)
 	double g = (double)((colorspec->lt >> 8 ) & 255) / 255.;
 	double b = (double)(colorspec->lt & 255) / 255.;
 	PS_FLUSH_PATH;
-	fprintf(gppsfile, "%3.2f %3.2f %3.2f C ",r,g,b);
+	fprintf(gppsfile, "%3.2f %3.2f %3.2f C\n",r,g,b);
     }
 
     if (colorspec->type != TC_FRAC)
@@ -4073,18 +4154,11 @@ PS_open_prologue_file(char *name)
     char *ps_prologue_env;
     FILE *prologue_fd;
 
-    /* Allocate and load default directory into ps_prologue_dir.　*/
+    /* Allocate and load default directory into ps_prologue_dir.  */
     /* FIXME:  Why should we have to recalculate this every time? */
 #ifdef GNUPLOT_PS_DIR
-#   if defined(_Windows)
-	/* retrieve prologues path relatively to gnuplot executable,
-	 * whose path is in szModuleName (winmain.c) */
-	ps_prologue_dir = gp_alloc(strlen((char*) szPackageDir)
-			+ strlen(GNUPLOT_PS_DIR) + 2, "Prolog path");
-	strcpy(ps_prologue_dir, (char*) szPackageDir);
-	strcat(ps_prologue_dir, "\\");
-	/* GNUPLOT_PS_DIR is _relative_ path */
-	strcat(ps_prologue_dir, GNUPLOT_PS_DIR);
+#   if defined(_WIN32)
+	ps_prologue_dir = RelativePathToGnuplot(GNUPLOT_PS_DIR);
 #   elif defined(OS2)
 	const ULONG bufsiz = 1024;
 	CHAR exepath[bufsiz];
@@ -4109,7 +4183,7 @@ PS_open_prologue_file(char *name)
 	    /* unsucessful to retrieve executable path */
 	    strcpy(ps_prologue_dir,"");
 	}
-#   else /* !_Windows && !OS2 */
+#   else /* !_WIN32 && !OS2 */
 	/* use hardcoded _absolute_ path */
 	ps_prologue_dir = gp_strdup(GNUPLOT_PS_DIR);
 #   endif
@@ -4189,6 +4263,8 @@ PS_dump_header_to_file(char *name)
 		dump = prologue_cp1250_ps;
 	else if (!strcmp(name,"cp1251.ps"))
 		dump = prologue_cp1251_ps;
+	else if (!strcmp(name,"cp1252.ps"))
+		dump = prologue_cp1252_ps;
 	else if (!strcmp(name,"cp437.ps"))
 		dump = prologue_cp437_ps;
 	else if (!strcmp(name,"cp850.ps"))
@@ -4341,7 +4417,7 @@ TERM_TABLE_START(post_driver)
     PS_text, null_scale, PS_graphics, PS_move, PS_vector, 
     PS_linetype, PS_put_text, PS_text_angle, 
     PS_justify_text, PS_point, PS_arrow, PS_set_font, PS_pointsize,
-    TERM_BINARY|TERM_IS_POSTSCRIPT|TERM_CAN_CLIP|TERM_CAN_DASH|TERM_MONOCHROME|TERM_LINEWIDTH|TERM_FONTSCALE, 
+    TERM_BINARY|TERM_IS_POSTSCRIPT|TERM_CAN_CLIP|TERM_CAN_DASH|TERM_MONOCHROME|TERM_LINEWIDTH|TERM_FONTSCALE|TERM_POINTSCALE, 
     0 /*suspend*/, 0 /*resume*/, PS_fillbox, PS_linewidth
 #ifdef USE_MOUSE
     , 0, 0, 0, 0, 0 /* no mouse support for postscript */
@@ -4386,7 +4462,7 @@ START_HELP(00psglobal)
 "                               {color | colour | monochrome}",\
 "                               {background <rgbcolor> | nobackground}",\
 "                               {dashlength | dl <DL>}",\
-"                               {linewidth | lw <LW>}",\
+"                               {linewidth | lw <LW>} {pointscale | ps <PS>}",\
 "                               {rounded | butt}",\
 "                               {clip | noclip}",\
 "                               {palfuncparam <samples>{,<maxdeviation>}}",\

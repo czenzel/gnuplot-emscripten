@@ -1,7 +1,3 @@
-/*
- * $Id: plot.h,v 1.55 2014/01/04 02:55:06 markisch Exp $
- */
-
 /* GNUPLOT - plot.h */
 
 /*[
@@ -53,10 +49,12 @@
 extern TBOOLEAN interactive;
 extern TBOOLEAN noinputfiles;
 extern TBOOLEAN persist_cl;
+extern TBOOLEAN slow_font_startup;
 
 extern const char *user_shell;
 
 extern TBOOLEAN ctrlc_flag;
+extern TBOOLEAN terminate_flag;
 
 #ifdef OS2
 extern TBOOLEAN CallFromRexx;
@@ -73,7 +71,7 @@ void bail_to_command_line __PROTO((void));
 void init_constants __PROTO((void));
 void init_session __PROTO((void));
 
-#if defined(_Windows)
+#if defined(_WIN32)
 int gnu_main __PROTO((int argc, char **argv));
 #endif
 

@@ -1,5 +1,5 @@
 /*
- * $Id: wresourc.h,v 1.19 2014/01/04 15:46:38 markisch Exp $
+ * $Id: wresourc.h,v 1.22 2016/08/10 17:52:27 markisch Exp $
  */
 
 /* GNUPLOT - win/wresourc.h */
@@ -76,18 +76,19 @@
 #define M_SAVE_AS_EMF  NUMMENU+13
 #define M_DOUBLEBUFFER NUMMENU+14
 #define M_OVERSAMPLE   NUMMENU+15
-#define M_GDIPLUS      NUMMENU+16
-#define M_ANTIALIASING NUMMENU+17
-#define M_POLYAA       NUMMENU+18
-#define M_PATTERNAA    NUMMENU+19
-#define M_FASTROTATE   NUMMENU+20
-#define M_HIDEGRID     NUMMENU+21
-#define M_HIDEPLOT     NUMMENU+22
-/* Warning: need MAXPLOTSHIDE free slots */
+#define M_GDI          NUMMENU+16
+#define M_GDIPLUS      NUMMENU+17
+#define M_D2D          NUMMENU+18
+#define M_ANTIALIASING NUMMENU+19
+#define M_POLYAA       NUMMENU+20
+#define M_FASTROTATE   NUMMENU+21
+#define M_SAVE_AS_BITMAP  NUMMENU+22
+#define M_HIDEGRID     NUMMENU+23
+#define M_HIDEPLOT     NUMMENU+24
+/* Warning: need MAXPLOTSHIDE free slots after M_HIDEPLOT */
 /* wtext.c */
 #define M_SYSCOLORS    NUMMENU+50
 #define M_WRAP         NUMMENU+51
-
 
 /* wprinter.c */
 #define PSIZE_SBOX 100
@@ -101,6 +102,7 @@
 #define PSIZE_OFFX 108
 #define PSIZE_OFFY 109
 #define CANCEL_PCDONE 120
+#define CANCEL_PROGRESS 121
 
 /* wgraph.c */
 /* line style dialog box */
@@ -118,4 +120,3 @@
 /* HBB 20010208: cursors for mouse-enabled wgnuplot */
 #define IDC_SCALING    222
 #define IDC_ROTATING   223
-

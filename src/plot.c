@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: plot.c,v 1.164.2.1 2014/12/31 04:32:09 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - plot.c */
 
 /*[
@@ -88,11 +84,12 @@ extern int vms_ktid;
 extern smg$create_key_table();
 #endif /* VMS */
 
-#ifdef _Windows
+#ifdef _WIN32
 # include <windows.h>
 # include "win/winmain.h"
 # include "win/wcommon.h"
-#endif /* _Windows */
+# include <io.h>           // for isatty
+#endif /* _WIN32 */
 
 /* GNU readline
  * Only required by two files directly,
@@ -128,9 +125,10 @@ static void wrapper_for_write_history __PROTO((void));
 
 TBOOLEAN interactive = TRUE;	/* FALSE if stdin not a terminal */
 TBOOLEAN noinputfiles = TRUE;	/* FALSE if there are script files */
-TBOOLEAN reading_from_dash=FALSE; /* True if processing "-" as an input file */
-TBOOLEAN skip_gnuplotrc = FALSE;/* skip system gnuplotrc and ~/.gnuplot */
-TBOOLEAN persist_cl = FALSE; /* TRUE if -persist is parsed in the command line */
+TBOOLEAN reading_from_dash=FALSE;	/* True if processing "-" as an input file */
+TBOOLEAN skip_gnuplotrc = FALSE;	/* skip system gnuplotrc and ~/.gnuplot */
+TBOOLEAN persist_cl = FALSE; 		/* --persist command line option */
+TBOOLEAN slow_font_startup = FALSE;	/* --slow command line option */
 
 /* user home directory */
 static const char *user_homedir = NULL;
@@ -138,7 +136,8 @@ static const char *user_homedir = NULL;
 /* user shell */
 const char *user_shell = NULL;
 
-static TBOOLEAN successful_initialization = FALSE;
+/* not static because unset.c refers to it when in debugging mode */
+TBOOLEAN successful_initialization = FALSE;
 
 #ifdef X11
 extern int X11_args __PROTO((int, char **)); /* FIXME: defined in term/x11.trm */
@@ -161,6 +160,8 @@ static int exit_status = EXIT_SUCCESS;
 
 /* Flag for asynchronous handling of Ctrl-C. Used by fit.c and Windows */
 TBOOLEAN ctrlc_flag = FALSE;
+/* Flag for (asynchronous) term signal on Windows. */
+TBOOLEAN terminate_flag = FALSE;
 
 #ifdef OS2
 # include <process.h>
@@ -255,14 +256,14 @@ take_privilege()
 void
 bail_to_command_line()
 {
-#ifdef _Windows
+#ifdef _WIN32
     kill_pending_Pause_dialog();
     ctrlc_flag = FALSE;
 #endif
     LONGJMP(command_line_env, TRUE);
 }
 
-#if defined(_Windows)
+#if defined(_WIN32)
 int
 gnu_main(int argc, char **argv)
 #else
@@ -279,10 +280,13 @@ main(int argc, char **argv)
 /* make sure that we really have revoked root access, this might happen if
    gnuplot is compiled without vga support but is installed suid by mistake */
 #ifdef __linux__
-    setuid(getuid());
+    if (setuid(getuid()) != 0) {
+	fprintf(stderr,"gnuplot: refusing to run at elevated privilege\n");
+	exit(EXIT_FAILURE);
+    }
 #endif
 
-#if defined(MSDOS) && !defined(_Windows) && !defined(__GNUC__)
+#if defined(MSDOS) && !defined(_WIN32) && !defined(__GNUC__)
     PC_setup();
 #endif /* MSDOS !Windows */
 
@@ -293,15 +297,18 @@ main(int argc, char **argv)
 #endif
 
 #if defined(OS2)
-    int rc;
+    {
+	int rc;
 #ifdef OS2_IPC
-    char semInputReadyName[40];
-    sprintf( semInputReadyName, "\\SEM32\\GP%i_Input_Ready", getpid() );
-    rc = DosCreateEventSem(semInputReadyName,&semInputReady,0,0);
-    if (rc != 0)
-      fputs("DosCreateEventSem error\n",stderr);
+	char semInputReadyName[40];
+
+	sprintf(semInputReadyName, "\\SEM32\\GP%i_Input_Ready", getpid());
+	rc = DosCreateEventSem(semInputReadyName, &semInputReady, 0, 0);
+	if (rc != 0)
+	    fputs("DosCreateEventSem error\n", stderr);
 #endif
-    rc = RexxRegisterSubcomExe("GNUPLOT", (PFN) RexxInterface, NULL);
+	rc = RexxRegisterSubcomExe("GNUPLOT", (PFN) RexxInterface, NULL);
+    }
 #endif
 
 /* malloc large blocks, otherwise problems with fragmented mem */
@@ -325,7 +332,10 @@ main(int argc, char **argv)
     unsigned int status[2] = { 1, 0 };
 #endif
 
-#if defined(HAVE_LIBEDITLINE)
+#if (defined(PIPE_IPC) || defined(_WIN32)) && (defined(HAVE_LIBREADLINE) || (defined(HAVE_LIBEDITLINE) && defined(X11)))
+    /* Editline needs this to be set before the very first call to readline(). */
+    /* Support for rl_getc_function is broken for utf-8 in editline. Since it is only
+       really required for X11, disable this section when building without X11. */
     rl_getc_function = getc_wrapper;
 #endif
 
@@ -363,6 +373,7 @@ main(int argc, char **argv)
 		    "  -V, --version\n"
 		    "  -h, --help\n"
 		    "  -p  --persist\n"
+		    "  -s  --slow\n"
 		    "  -d  --default-settings\n"
 		    "  -c  scriptfile ARG1 ARG2 ... \n"
 		    "  -e  \"command1; command2; ...\"\n"
@@ -381,11 +392,13 @@ main(int argc, char **argv)
 	    return 0;
 
 	} else if (!strncmp(argv[i], "-persist", 2) || !strcmp(argv[i], "--persist")
-#ifdef _Windows
+#ifdef _WIN32
 		|| !stricmp(argv[i], "-noend") || !stricmp(argv[i], "/noend")
 #endif
 		) {
 	    persist_cl = TRUE;
+	} else if (!strncmp(argv[i], "-slow", 2) || !strcmp(argv[i], "--slow")) {
+	    slow_font_startup = TRUE;
 	} else if (!strncmp(argv[i], "-d", 2) || !strcmp(argv[i], "--default-settings")) {
 	    /* Skip local customization read from ~/.gnuplot */
 	    skip_gnuplotrc = TRUE;
@@ -418,7 +431,6 @@ main(int argc, char **argv)
      * EAM - Jan 2013 YES.
      */
     setvbuf(stdin, (char *) NULL, _IONBF, 0);
-
 #endif
 
     gpoutfile = stdout;
@@ -433,15 +445,11 @@ main(int argc, char **argv)
     init_memory();
 
     interactive = FALSE;
-    init_terminal();		/* can set term type if it likes */
-    push_terminal(0);		/* remember the default terminal */
 
-    /* reset the terminal when exiting */
-    /* this is done through gp_atexit so that other terminal functions
-     * can be registered to be executed before the terminal is reset. */
-    gp_atexit(term_reset);
+    /* April 2017:  We used to call init_terminal() here, but now   */
+    /* We defer initialization until error handling has been set up. */
 
-# if defined(WIN32) && !defined(WGP_CONSOLE)
+# if defined(_WIN32) && !defined(WGP_CONSOLE)
     interactive = TRUE;
 # else
     interactive = isatty(fileno(stdin));
@@ -454,7 +462,7 @@ main(int argc, char **argv)
      * command line arguments are file names or an explicit in-line "-e command".
      */
     for (i = 1; i < argc; i++) {
-# ifdef _Windows
+# ifdef _WIN32
 	if (!stricmp(argv[i], "/noend"))
 	    continue;
 # endif
@@ -471,26 +479,6 @@ main(int argc, char **argv)
     else
 	show_version(NULL); /* Only load GPVAL_COMPILE_OPTIONS */
 
-#ifdef WGP_CONSOLE
-#ifdef CONSOLE_SWITCH_CP
-    if (cp_changed && interactive) {
-	fprintf(stderr,
-	    "\ngnuplot changed the codepage of this console from %i to %i to\n" \
-	    "match the graph window. Some characters might only display correctly\n" \
-	    "if you change the font to a non-raster type.\n",
-	    cp_input, GetConsoleCP());
-    }
-#else
-    if ((GetConsoleCP() != GetACP()) && interactive) {
-	fprintf(stderr,
-	    "\nWarning: The codepage of the graph window (%i) and that of the\n" \
-	    "console (%i) differ. Use `set encoding` or `!chcp` if extended\n" \
-	    "characters don't display correctly.\n",
-	    GetACP(), GetConsoleCP());
-    }
-#endif
-#endif
-
     update_gpval_variables(3);  /* update GPVAL_ variables available to user */
 
 #ifdef VMS
@@ -504,19 +492,34 @@ main(int argc, char **argv)
     if (!SETJMP(command_line_env, 1)) {
 	/* first time */
 	interrupt_setup();
-	/* should move this stuff to another initialisation routine,
-	 * something like init_set() maybe */
 	get_user_env();
 	init_loadpath();
 	init_locale();
 
 	memset(&sm_palette, 0, sizeof(sm_palette));
 	init_fit();		/* Initialization of fitting module */
+#ifdef READLINE
+	/* When using the built-in readline, we set the initial
+	   encoding according to the locale as this is required
+	   to properly handle keyboard input. */
+	init_encoding();
+#endif
+	/* April 2017: Now that error handling is in place, it is safe parse
+	 * GNUTERM during terminal initialization.
+	 * atexit processing is done in reverse order. We want
+	 * the generic terminal shutdown in term_reset to be executed before
+	 * any terminal specific cleanup requested by individual terminals.
+	 */
+	init_terminal();
+	push_terminal(0);	/* remember the initial terminal */
+	gp_atexit(term_reset);
+
+	/* Execute commands in ~/.gnuplot */
 	init_session();
 
 	if (interactive && term != 0) {		/* not unknown */
 #ifdef GNUPLOT_HISTORY
-#if defined(HAVE_LIBREADLINE) || defined(HAVE_LIBEDITLINE)
+#if (defined(HAVE_LIBREADLINE) || defined(HAVE_LIBEDITLINE)) && !defined(_WIN32)
 	    expanded_history_filename = tilde_expand(GNUPLOT_HISTORY_FILE);
 #else
 	    expanded_history_filename = gp_strdup(GNUPLOT_HISTORY_FILE);
@@ -533,7 +536,9 @@ main(int argc, char **argv)
 	    gp_atexit(wrapper_for_write_history);
 #endif /* GNUPLOT_HISTORY */
 
-	    fprintf(stderr, "\nTerminal type set to '%s'\n", term->name);
+#if defined(READLINE) && defined(WGP_CONSOLE)
+	    fprintf(stderr, "Encoding set to '%s'.\n", encoding_names[encoding]);
+#endif
 	}			/* if (interactive && term != 0) */
     } else {
 	/* come back here from int_error() */
@@ -545,8 +550,7 @@ main(int argc, char **argv)
 	if (interactive == FALSE)
 	    exit_status = EXIT_FAILURE;
 #ifdef HAVE_READLINE_RESET
-	else
-	{
+	else {
 	    /* reset properly readline after a SIGINT+longjmp */
 	    rl_reset_after_signal ();
 	}
@@ -594,13 +598,13 @@ main(int argc, char **argv)
 	    ++argv;
 	    c_token = 0;
 	    if (!strncmp(*argv, "-persist", 2) || !strcmp(*argv, "--persist")
-#ifdef _Windows
+#ifdef _WIN32
 		|| !stricmp(*argv, "-noend") || !stricmp(*argv, "/noend")
 #endif
 	    ) {
 		FPRINTF((stderr,"'persist' command line option recognized\n"));
 	    } else if (strcmp(*argv, "-") == 0) {
-#if defined(_Windows) && !defined(WGP_CONSOLE)
+#if defined(_WIN32) && !defined(WGP_CONSOLE)
 		TextShow(&textwin);
 		interactive = TRUE;
 #else
@@ -623,6 +627,9 @@ RECOVER_FROM_ERROR_IN_DASH:
 		noinputfiles = FALSE;
 		do_string(*argv);
 
+	    } else if (!strncmp(*argv, "-slow", 2) || !strcmp(*argv, "--slow")) {
+		slow_font_startup = TRUE;
+
 	    } else if (!strncmp(*argv, "-d", 2) || !strcmp(*argv, "--default-settings")) {
 		/* Ignore this; it already had its effect */
 		FPRINTF((stderr, "ignoring -d\n"));
@@ -638,10 +645,11 @@ RECOVER_FROM_ERROR_IN_DASH:
 		    fprintf(stderr, "syntax:  gnuplot -c scriptname args\n");
 		    gp_exit(EXIT_FAILURE);
 		}
-		for (i=0; i<argc; i++)
+		call_argc = GPMIN(9, argc - 1);
+		for (i=0; i<=call_argc; i++) {
 		    /* Need to stash argv[i] somewhere visible to load_file() */
 		    call_args[i] = gp_strdup(argv[i+1]);
-		call_argc = argc - 1;
+		}
 
 		load_file(loadpath_fopen(*argv, "r"), gp_strdup(*argv), 5);
 		gp_exit(EXIT_SUCCESS);
@@ -660,7 +668,7 @@ RECOVER_FROM_ERROR_IN_DASH:
 	while (!com_line())
 	    ctrlc_flag = FALSE; /* reset asynchronous Ctrl-C flag */
 
-#ifdef _Windows
+#ifdef _WIN32
     /* On Windows, handle 'persist' by keeping the main input loop running (windows/wxt), */
     /* but only if there are any windows open. Note that qt handles this properly. */
     if (persist_cl) {
@@ -695,7 +703,7 @@ RECOVER_FROM_ERROR_IN_DASH:
 
     /* HBB 20040223: Not all compilers like exit() to end main() */
     /* exit(exit_status); */
-#if ! defined(_Windows)
+#if ! defined(_WIN32)
     /* Windows does the cleanup later */
     gp_exit_cleanup();
 #endif
@@ -725,7 +733,6 @@ init_constants()
     (void) Gcomplex(&udv_pi.udv_value, M_PI, 0.0);
     udv_NaN = get_udv_by_name("NaN");
     (void) Gcomplex(&(udv_NaN->udv_value), not_a_number(), 0.0);
-    udv_NaN->udv_undef = FALSE;
 }
 
 /*
@@ -774,18 +781,13 @@ load_rcfile(int where)
 
     if (where == 0) {
 #ifdef GNUPLOT_SHARE_DIR
-# if defined(_Windows)
-	/* retrieve path relative to gnuplot executable,
-	 * whose path is in szModuleName (winmain.c) */
-	rcfile = gp_alloc(strlen((char *)szPackageDir) + 1
-	       + strlen(GNUPLOT_SHARE_DIR) + 1 + strlen("gnuplotrc") + 1, "rcfile");
-	strcpy(rcfile, (char *)szPackageDir);
-	PATH_CONCAT(rcfile, GNUPLOT_SHARE_DIR);
+# if defined(_WIN32)
+	rcfile = RelativePathToGnuplot(GNUPLOT_SHARE_DIR "\\gnuplotrc");
 # else
 	rcfile = (char *) gp_alloc(strlen(GNUPLOT_SHARE_DIR) + 1 + strlen("gnuplotrc") + 1, "rcfile");
 	strcpy(rcfile, GNUPLOT_SHARE_DIR);
-# endif
 	PATH_CONCAT(rcfile, "gnuplotrc");
+# endif
 	plotrc = fopen(rcfile, "r");
 #endif
 
@@ -815,6 +817,7 @@ load_rcfile(int where)
     free(rcfile);
 }
 
+
 void
 get_user_env()
 {
@@ -839,7 +842,7 @@ get_user_env()
 	const char *env_shell;
 
 	if ((env_shell = getenv("SHELL")) == NULL)
-#if defined(MSDOS) || defined(_Windows) || defined(OS2)
+#if defined(MSDOS) || defined(_WIN32) || defined(OS2)
 	    if ((env_shell = getenv("COMSPEC")) == NULL)
 #endif
 		env_shell = SHELL;
@@ -1059,7 +1062,7 @@ wrapper_for_write_history()
 	return;
     remove(expanded_history_filename);
     if (gnuplot_history_size < 0)
-    	write_history(expanded_history_filename);
+	write_history(expanded_history_filename);
     else
 	write_history_n(gnuplot_history_size, expanded_history_filename, "w");
 }

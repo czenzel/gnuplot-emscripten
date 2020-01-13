@@ -1,5 +1,5 @@
 /*
- * $Id: dynarray.h,v 1.7 2004/04/13 17:23:53 broeker Exp $
+ * $Id: dynarray.h,v 1.6 2001/02/15 18:13:23 broeker Exp $
  */
 
 /* GNUPLOT - dynarray.h */

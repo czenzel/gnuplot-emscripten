@@ -42,7 +42,7 @@ zrot=136
 zrot_delta = 355
 xview(xrot)=xrot
 zview(zrot)=zrot
-set view xview(xrot), zview(zrot), 2, 1
+set view xview(xrot), zview(zrot), 1.5, 1
 set size square
 
 splot cos(u)*cos(v),cos(u)*sin(v),sin(u) notitle with lines lt 5, \

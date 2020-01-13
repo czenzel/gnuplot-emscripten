@@ -1,5 +1,5 @@
 /*
- * $Id: pm3d.h,v 1.31 2014/04/02 21:35:46 sfeam Exp $
+ * $Id: pm3d.h,v 1.35 2016/11/05 21:21:07 sfeam Exp $
  */
 
 /* GNUPLOT - pm3d.h */
@@ -26,7 +26,8 @@
 #ifndef PM3D_H
 #define PM3D_H
 
-#include "graph3d.h" /* struct surface_points */
+#include "axis.h"	/* only for NONLINEAR_AXES */
+#include "graph3d.h"	/* struct surface_points */
 
 
 
@@ -56,10 +57,12 @@
   direction of taking the scans: forward = as the scans are stored in the
   file; backward = opposite direction, i.e. like from the end of the file
 */
-#define PM3D_SCANS_AUTOMATIC  'a'
-#define PM3D_SCANS_FORWARD    'f'
-#define PM3D_SCANS_BACKWARD   'b'
-#define PM3D_DEPTH            'd'
+typedef enum {
+    PM3D_SCANS_AUTOMATIC,
+    PM3D_SCANS_FORWARD,
+    PM3D_SCANS_BACKWARD,
+    PM3D_DEPTH
+} pm3d_scandir;
 
 /*
   clipping method:
@@ -92,9 +95,10 @@ typedef enum {
     PM3D_WHICHCORNER_GEOMEAN = 5, /* geometrical mean of 4 corners */
     PM3D_WHICHCORNER_HARMEAN = 6, /* harmonic mean of 4 corners */
     PM3D_WHICHCORNER_MEDIAN  = 7, /* median of 4 corners */
-    PM3D_WHICHCORNER_RMS	 = 8,  /* root mean square of 4 corners*/
+    PM3D_WHICHCORNER_RMS     = 8, /* root mean square of 4 corners*/
     PM3D_WHICHCORNER_MIN     = 9, /* minimum of 4 corners */
-    PM3D_WHICHCORNER_MAX     = 10,  /* maximum of 4 corners */
+    PM3D_WHICHCORNER_MAX     = 10,/* maximum of 4 corners */
+    PM3D_COLOR_BY_NORMAL     = 11 /* derive color from surface normal (not currently used) */
 } PM3D_WHICH_CORNERS2COLOR;
 
 /*
@@ -105,8 +109,10 @@ typedef struct {
   char where[7];	/* base, top, surface */
   char flush;   	/* left, right, center */
   char ftriangles;   	/* 0/1 (don't) draw flushing triangles */
-  char direction;	/* forward, backward */
   char clip;		/* 1in, 4in */
+  TBOOLEAN no_clipcb;	/* FALSE: cb<0 treated as 0  TRUE: cb<0 treated as NaN */
+  pm3d_scandir direction;
+  TBOOLEAN base_sort;	/* default: depth sort by mean z;   true: use z=0.0 */
   PM3D_IMPL_MODE implicit;
 			/* 1: [default] draw ALL surfaces with pm3d
 			   0: only surfaces specified with 'with pm3d' */
@@ -119,12 +125,31 @@ typedef struct {
 
 extern pm3d_struct pm3d;
 
+typedef struct lighting_model {
+  double strength;	/* 0 = no lighting model; 1 = full shading */
+  double spec;		/* specular component 0-1 */
+  double ambient;	/* ambient component 0-1 */
+  double Phong;		/* Phong exponent */
+  int rot_z;		/* illumination angle */
+  int rot_x;		/* illumination angle */
+  TBOOLEAN fixed;	/* TRUE means the light does not rotate */
+} lighting_model;
+
+extern lighting_model pm3d_shade;
+
 /* Used to initialize `set pm3d border` */
 extern struct lp_style_type default_pm3d_border;
 
 /* Used by routine filled_quadrangle() in color.c */
-extern struct lp_style_type pm3d_border_lp;	/* FIXME: Needed anymore? */
+extern struct lp_style_type pm3d_border_lp;
+extern TBOOLEAN track_pm3d_quadrangles;
 
+#if defined(NONLINEAR_AXES) && (NONLINEAR_AXES > 0)
+#   define z2cb(z) (z)
+#else
+    /* The original routine, with log/unlog dance steps */
+#   define z2cb(z) z2cb_with_logs(z)
+#endif
 
 
 /****
@@ -136,7 +161,8 @@ void pm3d_depth_queue_clear __PROTO((void));
 void pm3d_depth_queue_flush __PROTO((void));
 void pm3d_reset __PROTO((void));
 void pm3d_draw_one __PROTO((struct surface_points* plots));
-double z2cb __PROTO((double z));
+void pm3d_add_quadrangle __PROTO((struct surface_points* plot, gpdPoint *corners));
+double z2cb_with_logs __PROTO((double z));
 double cb2gray __PROTO((double cb));
 void
 pm3d_rearrange_scan_array __PROTO((struct surface_points* this_plot,

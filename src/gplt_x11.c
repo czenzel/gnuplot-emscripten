@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: gplt_x11.c,v 1.246.2.3 2014/12/15 04:24:07 sfeam Exp $"); }
-#endif
-
 #define MOUSE_ALL_WINDOWS 1
 
 /* GNUPLOT - gplt_x11.c */
@@ -189,8 +185,10 @@ typedef struct axis_scale_t {
 #ifdef __EMX__
 /* for gethostname ... */
 # include <netdb.h>
+/* name collision with X11 headers */
+# undef generic
 /* for __XOS2RedirRoot */
-#include <X11/Xlibint.h>
+# include <X11/Xlibint.h>
 #endif
 
 
@@ -237,7 +235,7 @@ typedef struct cmap_struct {
     cmap_t *cmap;
     struct cmap_struct *next_cmap_struct;
 } cmap_struct;
-    
+
 /* Stuff for toggling plots on/off in response to a mouse click on the key entry */
 typedef struct {
 	unsigned int left;
@@ -248,7 +246,6 @@ typedef struct {
 } x11BoundingBox;
 static TBOOLEAN x11_in_key_sample = FALSE;
 static TBOOLEAN x11_in_plot = FALSE;
-static TBOOLEAN retain_toggle_state = FALSE;
 static int x11_cur_plotno = 0;
 
 /* information about one window/plot */
@@ -306,7 +303,7 @@ typedef struct plot_struct {
      */
     int almost2d;
     int axis_mask;		/* Bits set to show which axes are active */
-    axis_scale_t axis_scale[2*SECOND_AXES];
+    axis_scale_t axis_scale[NUMBER_OF_MAIN_VISIBLE_AXES];
 #endif
     /* Last text position  - used by enhanced text mode */
     int xLast, yLast;
@@ -401,10 +398,12 @@ TBOOLEAN swap_endian = 0;  /* For binary data. */
 static inline void
 byteswap(char* data, int datalen)
 {
-    char tmp, *dest = data + datalen - 1;
-    if (datalen < 2) return;
+    char *dest = data + datalen - 1;
+
+    if (datalen < 2)
+	return;
     while (dest > data) {
-	tmp = *dest;
+	char tmp = *dest;
 	*dest-- = *data;
 	*data++ = tmp;
     }
@@ -472,7 +471,7 @@ static void DrawRotated __PROTO((plot_struct *, Display *, GC,
 static int DrawRotatedErrorHandler __PROTO((Display *, XErrorEvent *));
 static void exec_cmd __PROTO((plot_struct *, char *));
 
-static void reset_cursor __PROTO((void));
+static void reset_cursor __PROTO((Window));
 
 static void preset __PROTO((int, char **));
 static char *pr_GetR __PROTO((XrmDatabase, char *));
@@ -514,6 +513,7 @@ static int fontset_transsep __PROTO((char *, char *, int));
 #endif /* USE_X11_MULTIBYTE */
 static int gpXTextWidth __PROTO((XFontStruct *, const char *, int));
 static int gpXTextHeight __PROTO((XFontStruct *));
+static int gpXTextExtents __PROTO((XFontStruct *, char *, int, XCharStruct *));
 static void gpXSetFont __PROTO((Display *, GC, Font));
 static void gpXDrawImageString __PROTO((Display *, Drawable, GC, int, int, const char *, int));
 static void gpXDrawString __PROTO((Display *, Drawable, GC, int, int, const char *, int));
@@ -1077,8 +1077,10 @@ delete_plot(plot_struct *plot)
 
     FPRINTF((stderr, "Delete plot %d\n", plot->plot_number));
 
-    for (i = 0; i < plot->ncommands; ++i)
+    for (i = 0; i < plot->ncommands; ++i) {
 	free(plot->commands[i]);
+	plot->commands[i] = NULL;
+    }
     plot->ncommands = 0;
     if (plot->commands)
 	free(plot->commands);
@@ -1126,8 +1128,10 @@ prepare_plot(plot_struct *plot)
 {
     int i;
 
-    for (i = 0; i < plot->ncommands; ++i)
+    for (i = 0; i < plot->ncommands; ++i) {
 	free(plot->commands[i]);
+	plot->commands[i] = NULL;
+    }
     plot->ncommands = 0;
 
     if (!plot->posn_flags) {
@@ -1181,7 +1185,7 @@ prepare_plot(plot_struct *plot)
      * window
      */
     plot->angle = 0;		/* default is horizontal */
-    reset_cursor();
+    reset_cursor(plot->window);	/* to avoid flash, don't reset cursor of active window */
     XDefineCursor(dpy, plot->window, cursor);
 }
 
@@ -1485,7 +1489,6 @@ record()
 		switch(layer)
 		{
 		case TERM_LAYER_BEFORE_ZOOM:
-		    retain_toggle_state = TRUE;
 		    break;
 		default:
 		    if (plot)
@@ -1600,13 +1603,13 @@ record()
 #endif
 	    return 1;
 	case 'R':		/* leave x11 mode */
-	    reset_cursor();
+	    reset_cursor(0);
 	    return 0;
 
 	case X11_GR_MAKE_PALETTE:
 	    if (have_pm3d) {
 		char cmapidx[6] = "e";
-		int cm_index;
+		unsigned int cm_index;
 	        cmap_struct *csp;
 		/* Get and process palette */
 		scan_palette_from_buf();
@@ -1861,7 +1864,6 @@ record()
 		    }
 		}
 
-		retain_toggle_state = TRUE;
 		display(plot);
 	    }
 	    return 1;
@@ -1956,7 +1958,7 @@ record()
 	break;
     case 'R':			/* exit x11 mode */
 	FPRINTF((stderr, "received R - sending ClientMessage\n"));
-	reset_cursor();
+	reset_cursor(0);
 	sys$cancel(STDIINchannel);
 	/* this is ridiculous - cook up an event to ourselves,
 	 * in order to get the mainloop() out of the XNextEvent() call
@@ -2389,8 +2391,7 @@ exec_cmd(plot_struct *plot, char *command)
 			fill_gc = XCreateGC(dpy,plot->window,0,0);
 		    XCopyGC(dpy, *current_gc, ~0, fill_gc);
 		    XSetFillStyle(dpy, fill_gc, FillSolid);
-		    XSetForeground(dpy, fill_gc, plot->cmap->colors[0]);
-		    XFillRectangle(dpy, plot->pixmap, fill_gc, 
+		    XFillRectangle(dpy, plot->pixmap, fill_gc,
 			bb[0], bb[1], bb[2]-bb[0], bb[3]-bb[1]);
 		    /* boxing = FALSE; */
 		    return;
@@ -2454,10 +2455,9 @@ exec_cmd(plot_struct *plot, char *command)
 #ifdef EAM_BOXED_TEXT
 	    if (boxing) {
 		/* Request bounding box information for this string */
-		int direction, ascent, descent;
 		unsigned int bb[4];
 		XCharStruct overall;
-		XTextExtents(font, str, sl, &direction, &ascent, &descent, &overall);
+		gpXTextExtents(font, str, sl, &overall);
 		bb[0] = X(x) + overall.lbearing + sj;
 		bb[2] = X(x) + overall.rbearing + sj;
 		bb[1] = Y(y) - overall.ascent  + v_offset;
@@ -2884,16 +2884,17 @@ exec_cmd(plot_struct *plot, char *command)
 	    }
 
 	    if (!i_remaining) {
-
 		int i;
+		/* points is defined as (XPoint *), but has been abused until this
+		 * point to hold raw integers.  Make a type-correct pointer to clarify this */
+		int *int_points = (int*)points;
 
 		transferring = 0;
 
 		/* If the byte order needs to be swapped, do so. */
 		if (swap_endian) {
-		    i = 2*npoints;
-		    for (i--; i >= 0; i--) {
-			byteswap((char *)&((int *)points)[i], sizeof(int));
+		    for (i = 2 * npoints - 1; i >= 0; i--) {
+			byteswap((char *)(int_points + i), sizeof(int));
 		    }
 		}
 
@@ -2901,8 +2902,8 @@ exec_cmd(plot_struct *plot, char *command)
 		 * on itself, but the XPoint x and y are smaller than an int.
 		 */
 		for (i=0; i < npoints; i++) {
-		    points[i].x = X( ((int *)points)[2*i] );
-		    points[i].y = Y( ((int *)points)[2*i+1] );
+		    points[i].x = X(int_points[2 * i    ]);
+		    points[i].y = Y(int_points[2 * i + 1]);
 		}
 
 		/* Load selected pattern or fill into a separate gc */
@@ -3405,7 +3406,7 @@ exec_cmd(plot_struct *plot, char *command)
 	    plot->almost2d = axis_mask;
 	} else if (axis < 0) {
 	    plot->axis_mask = axis_mask;
-	} else if (axis < 2*SECOND_AXES) {
+	} else if (axis < NUMBER_OF_MAIN_VISIBLE_AXES) {
 	    sscanf(&buffer[1], "%d %lg %d %lg %lg", &axis,
 		&(plot->axis_scale[axis].min), &(plot->axis_scale[axis].term_lower),
 		&(plot->axis_scale[axis].term_scale), &(plot->axis_scale[axis].logbase));
@@ -3552,12 +3553,6 @@ display(plot_struct *plot)
     x11_cur_plotno = 0;
     x11_in_key_sample = FALSE;
     x11_initialize_key_boxes(plot, 0);
-
-    /* Maintain on/off toggle state when zooming */
-    if (retain_toggle_state)
-	retain_toggle_state = FALSE;
-    else
-	x11_initialize_hidden(plot, 0);
 
     /* loop over accumulated commands from inboard driver */
     for (n = 0; n < plot->ncommands; n++) {
@@ -4090,7 +4085,7 @@ DrawLineToRuler(plot_struct * plot)
     if (!gc_xor) {
 	GetGCXor(plot, &gc_xor);
     }
-    XDrawLine(dpy, plot->window, gc_xor, 
+    XDrawLine(dpy, plot->window, gc_xor,
 	    X(plot->ruler_x), Y(plot->ruler_y),
 	    plot->ruler_lineto_x, plot->ruler_lineto_y);
 }
@@ -4353,7 +4348,7 @@ static char*
 getMultiTabConsoleSwitchCommand(unsigned long *newGnuplotXID)
 {
 /* NOTE: This code uses the DCOP mechanism from KDE3, which went away in KDE4 */
-#ifdef HAVE_STRDUP	/* We assume that any machine missing strdup is too old for KDE */
+#ifdef USE_KDE3_DCOP
     char *cmd = NULL; /* result */
     char *ptr = getenv("KONSOLE_DCOP_SESSION"); /* Try KDE's Konsole first. */
     *newGnuplotXID = 0;
@@ -4428,14 +4423,14 @@ getMultiTabConsoleSwitchCommand(unsigned long *newGnuplotXID)
     /* now test for GNOME multitab console */
     /* ... if somebody bothers to implement it ... */
 
-#endif /* HAVE_STRDUP */
-/* NOTE: End of DCOP/KDE3 code (no longer works in KDE4) */
+#endif /* USE_KDE3_DCOP */
+
     /* we are not running in any known (implemented) multitab console */
     return NULL;
 }
 
-#endif
 #endif	/* DISABLE_SPACE_RAISES_CONSOLE */
+#endif  /* USE_MOUSE */
 
 
 /*---------------------------------------------------------------------------
@@ -4443,12 +4438,12 @@ getMultiTabConsoleSwitchCommand(unsigned long *newGnuplotXID)
  *---------------------------------------------------------------------------*/
 
 static void
-reset_cursor()
+reset_cursor(Window skip_window)
 {
     plot_struct *plot = plot_list_start;
 
     while (plot) {
-	if (plot->window) {
+	if (plot->window && (plot->window != skip_window)) {
 	    FPRINTF((stderr, "Window for plot %d exists\n", plot->plot_number));
 	    XUndefineCursor(dpy, plot->window);
 	}
@@ -4665,7 +4660,7 @@ process_event(XEvent *event)
 		static int cmd_tried = 0;
 		static char *cmd = NULL;
 		static unsigned long newGnuplotXID = 0;
-		
+
 		/* If the "-ctrlq" resource is set, ignore ' ' unless control key is also pressed */
 		if (ctrlq && !(modifier_mask & Mod_Ctrl))
 		    break;
@@ -5064,7 +5059,6 @@ process_event(XEvent *event)
 	/* Note: we can toggle even if the plot is not in the active window */
 	if (event->xbutton.button == 1) {
 	    if (x11_check_for_toggle(plot, event->xbutton.x, event->xbutton.y)) {
-		retain_toggle_state = TRUE;
 		display(plot);
 	    }
 	}
@@ -5609,7 +5603,7 @@ static char dash_mono[Ndashes][10] = {
 /* Version 5 default dash types */
 static char dash_color[Ndashes][10] = {
     "0", "16",
-    "0", "64", "26", "6424", "642424", "0", "64", "26" 
+    "0", "64", "26", "6424", "642424", "0", "64", "26"
 };
 
 static void
@@ -5677,6 +5671,27 @@ int gpXTextHeight (XFontStruct *cfont)
     } else
 #endif
 	return cfont->ascent + cfont->descent;
+}
+
+int gpXTextExtents (XFontStruct *cfont, char *str, int nchar,
+		    XCharStruct *overall)
+{
+    int direction, ascent, decent;
+#ifdef USE_X11_MULTIBYTE
+    if (usemultibyte) {
+	int ret;
+	XRectangle o_ink, o_logical;
+	ret = XmbTextExtents(mbfont, str, nchar, &o_ink, &o_logical);
+	overall->lbearing = o_logical.x;
+	overall->rbearing = o_logical.x + o_logical.width;
+	overall->width = o_logical.width;
+	overall->ascent = - o_logical.y;
+	overall->descent = o_logical.height + o_logical.y;
+	return ret;
+    }
+#endif
+    return XTextExtents(cfont, str, nchar, &direction, &ascent,
+			&decent, overall);
 }
 
 void gpXSetFont (Display *disp, GC gc, Font fontid)
@@ -5899,7 +5914,7 @@ char *fontname;
     if (!fontname || !(*fontname)) {
 	if ((fontname = pr_GetR(db, ".font"))) {
 	    strncpy(default_font, fontname, sizeof(default_font)-1);
-    /* shige: default_font may be clear for each plot command by 
+    /* shige: default_font may be clear for each plot command by
      * X11_set_default_font() in x11.trm, since the function is called
      * in X11_graphics(). And then the font list will be cleared by the
      * next line in the case the default font is defined in X11 Resources.
@@ -5938,7 +5953,7 @@ char *fontname;
 	    hchar = search->hchar;
 	    return;
 #else
-	    if (!usemultibyte && !search->ismbfont) { 
+	    if (!usemultibyte && !search->ismbfont) {
 		font = search->font;
 		vchar = search->vchar;
 		hchar = search->hchar;
@@ -5954,7 +5969,7 @@ char *fontname;
     }
     /* If we get here, the request doesn't match a previously used font.
      * Whatever font we end up with should be recorded in the used_font
-     * list so that we can find it cheaply next time.		
+     * list so that we can find it cheaply next time.
      */
     requested_name = strdup(fontname);
 
@@ -6115,7 +6130,7 @@ char *fontname;
 		/* But (mincho|gothic) X fonts are not provided
 		 * on some X servers even in Japan
 		 */
-		sprintf(fontspec, "*-%s-%c-*--%d-*", 
+		sprintf(fontspec, "*-%s-%c-*--%d-*",
 			weight, slant, fontsize);
 		font = gpXLoadQueryFont(dpy, try_name = fontspec);
 	    }
@@ -6190,7 +6205,7 @@ char *fontname;
 #ifndef USE_X11_MULTIBYTE
     search->font = font;
 #else
-    if (!usemultibyte) { 
+    if (!usemultibyte) {
 	search->ismbfont = 0;
 	search->font = font;
 	search->mbfont = NULL;
@@ -6206,7 +6221,7 @@ char *fontname;
 
     FPRINTF((stderr, "gnuplot_x11: pr_font() set font %s, vchar %d hchar %d\n",
 		fontname, vchar, hchar));
-    FPRINTF((stderr, "gnuplot_x11: requested \"%s\" succeeded with \"%s\"\n", 
+    FPRINTF((stderr, "gnuplot_x11: requested \"%s\" succeeded with \"%s\"\n",
     		requested_name, try_name));
 
 }
@@ -6320,7 +6335,7 @@ pr_window(plot_struct *plot)
 	plot->gheight = gattr.height;
 	if (!plot->window) {
 	    plot->window = XCreateWindow(dpy, plot->external_container, plot->x, plot->y, plot->width,
-					 plot->height, 0, dep, InputOutput, vis, 0, NULL);
+					 plot->height, 0, dep, InputOutput, gattr.visual, 0, NULL);
 		gp_execute_GE_plotdone(plot->window); /* notify main program, send WINDOWID */
 	}
     }

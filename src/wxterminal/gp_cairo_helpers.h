@@ -1,5 +1,5 @@
 /*
- * $Id: gp_cairo_helpers.h,v 1.1 2009/01/13 14:08:48 tlecomte Exp $
+ * $Id$
  */
 
 /* GNUPLOT - gp_cairo_helpers.h */

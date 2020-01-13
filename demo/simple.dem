@@ -1,5 +1,5 @@
 #
-# $Id: simple.dem,v 1.7 2012/11/18 23:12:22 sfeam Exp $
+# $Id: simple.dem,v 1.5 2011/08/19 21:01:41 sfeam Exp $
 #
 # Requires data files "[123].dat" from this directory,
 # so change current working directory to this directory before running.

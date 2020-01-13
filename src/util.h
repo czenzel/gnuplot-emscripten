@@ -1,5 +1,5 @@
 /*
- * $Id: util.h,v 1.44.2.2 2016/08/19 16:14:08 sfeam Exp $
+ * $Id: util.h,v 1.50 2016/08/19 16:13:59 sfeam Exp $
  */
 
 /* GNUPLOT - util.h */
@@ -62,8 +62,10 @@ extern char *current_locale;	/* LC_TIME */
 /* degree sign */
 extern char degree_sign[8];
 
-/* minus sign */
+/* special characters used by gprintf() */
+extern const char *micro;
 extern const char *minus_sign;
+extern TBOOLEAN use_micro;
 extern TBOOLEAN use_minus_sign;
 
 extern const char *current_prompt; /* needed by is_error() and friends */
@@ -77,6 +79,7 @@ int isstring __PROTO((int));
 int isanumber __PROTO((int));
 int isletter __PROTO((int));
 int is_definition __PROTO((int));
+TBOOLEAN might_be_numeric __PROTO((int));
 void copy_str __PROTO((char *, int, int));
 size_t token_len __PROTO((int));
 void capture __PROTO((char *, int, int, int));
@@ -100,22 +103,22 @@ void gprintf __PROTO((char *, size_t, char *, double, double));
 #  if defined(__GNUC__)
     void os_error __PROTO((int, const char *, ...)) __attribute__((noreturn));
     void int_error __PROTO((int, const char *, ...)) __attribute__((noreturn));
-    void graph_error __PROTO((const char *, ...)) __attribute__((noreturn));
+    void common_error_exit __PROTO((void)) __attribute__((noreturn));
 #  elif defined(_MSC_VER)
     __declspec(noreturn) void os_error(int, const char *, ...);
     __declspec(noreturn) void int_error(int, const char *, ...);
-    __declspec(noreturn) void graph_error(const char *, ...);
+    __declspec(noreturn) void common_error_exit();
 #  else
     void os_error __PROTO((int, const char *, ...));
     void int_error __PROTO((int, const char *, ...));
-    void graph_error __PROTO((const char *, ...));
+    void common_error_exit __PROTO((void));
 #  endif
 void int_warn __PROTO((int, const char *, ...));
 #else
 void os_error __PROTO(());
 void int_error __PROTO(());
 void int_warn __PROTO(());
-void graph_error __PROTO(());
+void common_error_exit __PROTO(());
 #endif
 
 void squash_spaces __PROTO((char *s, int remain));
@@ -127,7 +130,9 @@ char *getusername __PROTO((void));
 
 TBOOLEAN contains8bit __PROTO((const char *s));
 TBOOLEAN utf8toulong __PROTO((unsigned long * wch, const char ** str));
+TBOOLEAN is_sjis_lead_byte(char c);
 size_t strlen_utf8 __PROTO((const char *s));
+size_t strlen_sjis(const char *s);
 size_t gp_strlen __PROTO((const char *s));
 char * gp_strchrn __PROTO((const char *s, int N));
 TBOOLEAN streq __PROTO((const char *a, const char *b));

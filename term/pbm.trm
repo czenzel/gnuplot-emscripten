@@ -490,6 +490,7 @@ START_HELP(pbm)
 "?terminal pbm",
 "?term pbm",
 "?pbm",
+" Note: only available if gnuplot is configured --with-bitmap-terminals.",
 " Syntax:",
 "       set terminal pbm {<fontsize>} {<mode>} {size <x>,<y>}",
 "",

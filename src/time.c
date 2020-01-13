@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: time.c,v 1.28.2.3 2015/10/22 16:16:33 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - time.c */
 
 /*[
@@ -37,8 +33,8 @@ static char *RCSid() { return RCSid("$Id: time.c,v 1.28.2.3 2015/10/22 16:16:33 
 
 /* This module either adds a routine gstrptime() to read a formatted time,
  * augmenting the standard suite of time routines provided by ansi,
- * or it completely replaces the whole lot with a new set of routines,
- * which count time relative to the year 2000. Default is to use the
+ * or it completely replaces the whole lot with a new set of routines
+ * which count time relative to the EPOCH date. Default is to use the
  * new routines. Define USE_SYSTEM_TIME to use the system routines, at your
  * own risk. One problem in particular is that not all systems allow
  * the time with integer value 0 to be represented symbolically, which
@@ -78,7 +74,7 @@ static int gdysize __PROTO((int yr));
 
 static int mndday[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 
-static size_t xstrftime __PROTO((char *buf, size_t bufsz, const char *fmt, struct tm * tm, double usec, double fulltime));
+static size_t xstrftime __PROTO((char *buf, int bsz, const char *fmt, struct tm * tm, double usec, double fulltime));
 
 /* days in year */
 static int
@@ -94,15 +90,27 @@ gdysize(int yr)
 }
 
 
-/* new strptime() and gmtime() to allow time to be read as 24 hour,
- * and spaces in the format string. time is converted to seconds from
- * year 2000.... */
+/* gstrptime() interprets a time_spec format string
+ * and fills in a time structure that can be passed to gmtime() to
+ * recover number of seconds from the EPOCH date.
+ * Return value:
+ * DT_TIMEDATE	indicates "normal" format elements corresponding to
+ *		a date that is returned in tm, with fractional seconds
+ *		returned in usec
+ * DT_DMS	indicates relative time format elements were encountered
+ *		(tH tM tS).  The relative time in seconds is returned
+ *		in reltime.
+ * DT_BAD	time format could not be interpreted
+ *
+ * parameters and return values revised for gnuplot version 5.3
+ */
 
-char *
-gstrptime(char *s, char *fmt, struct tm *tm, double *usec)
+td_type
+gstrptime(char *s, char *fmt, struct tm *tm, double *usec, double *reltime)
 {
     int yday = 0;
     TBOOLEAN sanity_check_date = FALSE;
+    TBOOLEAN reltime_formats = FALSE;
 
     tm->tm_mday = 1;
     tm->tm_mon = tm->tm_hour = tm->tm_min = tm->tm_sec = 0;
@@ -136,6 +144,12 @@ gstrptime(char *s, char *fmt, struct tm *tm, double *usec)
     if (strstr(fmt,"%m") || strstr(fmt,"%B") || strstr(fmt,"%b")) {
 	tm->tm_mon = -1;
 	sanity_check_date = TRUE;
+    }
+    /* Relative time formats tH tM tS cannot be mixed with date formats */
+    if (strstr(fmt,"%t")) {
+	reltime_formats = TRUE;
+	*reltime = 0.0;
+	sanity_check_date = FALSE;
     }
 
 
@@ -253,13 +267,55 @@ gstrptime(char *s, char *fmt, struct tm *tm, double *usec)
 		    ufraction = atof(fraction);
 		if (ufraction < 1.)		/* Filter out e.g. 123.456e7 */
 		    *usec = ufraction;
+		*reltime = when;		/* not used unless return DT_DMS */
 		break;
 	    }
+
+	case 't':
+	    /* Relative time formats tH tM tS */
+	    {
+		double cont = 0;
+		fmt++;
+		if (*fmt == 'H') {
+		    cont = 3600. * strtod(s, &s);
+		} else if (*fmt == 'M') {
+		    cont = 60. * strtod(s, &s);
+		} else if (*fmt == 'S') {
+		    cont = strtod(s, &s);
+		} else {
+		    return DT_BAD;
+		}
+		if (*reltime < 0)
+		    *reltime -= fabs(cont);
+		else
+		    *reltime += cont;
+		/* FIXME:  reltime > 0 && cont < 0 should be disallowed */
+		/* FIXME:  leading precision field should be accepted but ignored */
+		break;
+	    }
+
+	case 'a':		/* weekday name (ignored) */
+	case 'A':		/* weekday name (ignored) */
+	    while (isalpha(*s))
+		s++;
+	    break;
+	case 'w':		/* one or two digit weekday number (ignored) */
+	case 'W':		/* one or two digit week number (ignored) */
+	    if (isdigit(*s))
+		s++;
+	    if (isdigit(*s))
+		s++;
+	    break;
 
 	default:
 	    int_warn(DATAFILE, "Bad time format in string");
 	}
 	fmt++;
+    }
+
+    /* Relative times are easy.  Just return the value in reltime */
+    if (reltime_formats) {
+	return DT_DMS;
     }
 
     FPRINTF((stderr, "read date-time : %02d/%02d/%d:%02d:%02d:%02d\n", tm->tm_mday, tm->tm_mon + 1, tm->tm_year, tm->tm_hour, tm->tm_min, tm->tm_sec));
@@ -297,8 +353,7 @@ gstrptime(char *s, char *fmt, struct tm *tm, double *usec)
 	if (yday) {
 
 	    if (tm->tm_yday < 0) {
-		// int_error(DATAFILE, "Illegal day of year");
-		return (NULL);
+		return DT_BAD;
 	    }
 
 	    /* we just set month to jan, day to yday, and let the
@@ -310,12 +365,10 @@ gstrptime(char *s, char *fmt, struct tm *tm, double *usec)
 	    tm->tm_mday = tm->tm_yday + 1;
 	}
 	if (tm->tm_mon < 0) {
-	    // int_error(DATAFILE, "illegal month");
-	    return (NULL);
+	    return DT_BAD;
 	}
 	if (tm->tm_mday < 1) {
-	    // int_error(DATAFILE, "illegal day of month");
-	    return (NULL);
+	    return DT_BAD;
 	}
 	if (tm->tm_mon > 11) {
 	    tm->tm_year += tm->tm_mon / 12;
@@ -331,7 +384,7 @@ gstrptime(char *s, char *fmt, struct tm *tm, double *usec)
 	    }
 	}
     }
-    return (s);
+    return DT_TIMEDATE;
 }
 
 size_t
@@ -351,7 +404,7 @@ gstrftime(char *s, size_t bsz, const char *fmt, double l_clock)
 static size_t
 xstrftime(
     char *str,			/* output buffer */
-    size_t bsz,			/* space available */
+    int bsz,			/* remaining space available in buffer */
     const char *fmt,
     struct tm *tm,
     double usec,
@@ -361,6 +414,9 @@ xstrftime(
     int incr = 0;			/* chars just written */
     char *s = str;
     TBOOLEAN sign_printed = FALSE;
+
+    if (bsz <= 0)
+	return 0;
 
     memset(str, '\0', bsz);
 
@@ -541,12 +597,15 @@ xstrftime(
 			/* Set flag in case minutes come next */
 			if (fulltime < 0) {
 			    CHECK_SPACE(1);	/* the minus sign */
-			    sign_printed = TRUE;
 			    *s++ = '-';
 			    l++;
 			}
+			sign_printed = TRUE;
 			/* +/- integral hour truncated toward zero */
 			sprintf(s, "%0*d", w, (int)floor(fabs(fulltime/3600.)));
+
+			/* Subtract the hour component from the total */
+			fulltime -= sgn(fulltime) * 3600. * floor(fabs(fulltime/3600.));
 			break;
 		    case 'M':
 			/* +/- fractional minutes (not wrapped at 60m) */
@@ -557,19 +616,20 @@ xstrftime(
 			    break;
 			}
 			/* +/- integral minute truncated toward zero */
-			tminute = floor(60. * (fabs(fulltime/3600.) - floor(fabs(fulltime/3600.))));
-			if (fulltime < 0) {
-			    if (!sign_printed) {
-				sign_printed = TRUE;
+			tminute = floor((fabs(fulltime/60.)));
+			if (fulltime < 0 && !sign_printed) {
 				*s++ = '-';
 				l++;
-			    }
 			}
+			sign_printed = TRUE;
 			FORMAT_STRING(1, 2, tminute);	/* %02d */
+
+			/* Subtract the minute component from the total */
+			fulltime -= sgn(fulltime) * 60. * floor(fabs(fulltime/60.));
 			break;
 		    case 'S':
 			/* +/- fractional seconds */
-			tsecond = floor(60. * (fabs(fulltime/60.) - floor(fabs(fulltime/60.))));
+			tsecond = floor(fabs(fulltime));
 			if (fulltime < 0) {
 			    if (usec > 0)
 				usec = 1.0 - usec;
@@ -729,14 +789,7 @@ ggmtime(struct tm *tm, double l_clock)
 
     tm->tm_year = ZERO_YEAR;
     tm->tm_mday = tm->tm_yday = tm->tm_mon = tm->tm_hour = tm->tm_min = tm->tm_sec = 0;
-    if (l_clock < 0) {
-	while (l_clock < 0) {
-	    int days_in_year = gdysize(--tm->tm_year);
-	    l_clock += days_in_year * DAY_SEC;	/* 24*3600 */
-	    /* adding 371 is noop in modulo 7 arithmetic, but keeps wday +ve */
-	    wday += 371 - days_in_year;
-	}
-    } else {
+    if (l_clock >= 0) {
 	for (;;) {
 	    int days_in_year = gdysize(tm->tm_year);
 	    if (l_clock < days_in_year * DAY_SEC)
@@ -745,6 +798,13 @@ ggmtime(struct tm *tm, double l_clock)
 	    tm->tm_year++;
 	    /* only interested in result modulo 7, but %7 is expensive */
 	    wday += (days_in_year - 364);
+	}
+    } else {
+	while (l_clock < 0) {
+	    int days_in_year = gdysize(--tm->tm_year);
+	    l_clock += days_in_year * DAY_SEC;	/* 24*3600 */
+	    /* adding 371 is noop in modulo 7 arithmetic, but keeps wday +ve */
+	    wday += 371 - days_in_year;
 	}
     }
     tm->tm_yday = (int) (l_clock / DAY_SEC);
@@ -763,6 +823,12 @@ ggmtime(struct tm *tm, double l_clock)
     while (days >= (i = mndday[tm->tm_mon] + (tm->tm_mon == 1 && (gdysize(tm->tm_year) > 365)))) {
 	days -= i;
 	tm->tm_mon++;
+	/* This catches round-off error that initially assigned a date to year N-1 */
+	/* but counting out seconds puts it in the first second of Jan year N.     */
+	if (tm->tm_mon > 11) {
+	    tm->tm_mon = 0;
+	    tm->tm_year++;
+	}
     }
     tm->tm_mday = days + 1;
 

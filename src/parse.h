@@ -1,5 +1,5 @@
 /*
- * $Id: parse.h,v 1.29.2.3 2016/06/18 05:59:25 sfeam Exp $
+ * $Id: parse.h,v 1.38 2017/02/04 23:59:27 sfeam Exp $
  */
 
 /* GNUPLOT - parse.h */
@@ -64,6 +64,9 @@ extern int at_highest_column_used;
 /* This is checked by df_readascii() */
 extern TBOOLEAN parse_1st_row_as_headers;
 
+/* This is used by df_open() and df_readascii() */
+extern udvt_entry *df_array;
+
 /* Protection mechanism for trying to parse a string followed by a + or - sign.
  * Also suppresses an undefined variable message if an unrecognized token
  * is encountered during try_to_get_string().
@@ -84,26 +87,26 @@ struct at_type * create_call_column_at __PROTO((char *));
 struct udvt_entry * add_udv __PROTO((int t_num));
 struct udft_entry * add_udf __PROTO((int t_num));
 void cleanup_udvlist __PROTO((void));
+int is_function __PROTO((int t_num));
 
 /* Code that uses the iteration routines here must provide */
 /* a blank iteration structure to use for bookkeeping.     */
 typedef struct iterator {
-	struct iterator *next;  /* doubly linked list */
-	struct iterator *prev;
+	struct iterator *next;		/* linked list */
 	struct udvt_entry *iteration_udv;
+	t_value original_udv_value;	/* prior value of iteration variable */
 	char *iteration_string;
 	int iteration_start;
 	int iteration_end;
 	int iteration_increment;
-	int iteration_current;	/* start + increment * iteration */
-	int iteration;		/* runs from 0 to (end-start)/increment */
-	TBOOLEAN done;
-	TBOOLEAN really_done;
-	TBOOLEAN empty_iteration;
+	int iteration_current;		/* start + increment * iteration */
+	int iteration;			/* runs from 0 to (end-start)/increment */
+	struct at_type *start_at;	/* expression that evaluates to iteration_start */
+	struct at_type *end_at;		/* expression that evaluates to iteration_end */
 } t_iterator;
 
 extern t_iterator * plot_iterator;	/* Used for plot and splot */
-extern t_iterator * set_iterator;		/* Used by set/unset commands */
+extern t_iterator * set_iterator;	/* Used by set/unset commands */
 
 /* These are used by the iteration code */
 t_iterator * check_for_iteration __PROTO((void));

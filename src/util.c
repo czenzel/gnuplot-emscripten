@@ -1,7 +1,3 @@
-#ifndef lint
-static char *RCSid() { return RCSid("$Id: util.c,v 1.128.2.5 2016/08/19 16:14:08 sfeam Exp $"); }
-#endif
-
 /* GNUPLOT - util.c */
 
 /*[
@@ -38,23 +34,18 @@ static char *RCSid() { return RCSid("$Id: util.c,v 1.128.2.5 2016/08/19 16:14:08
 
 #include "alloc.h"
 #include "command.h"
+#include "datablock.h"
 #include "datafile.h"		/* for df_showdata and df_reset_after_error */
 #include "internal.h"		/* for eval_reset_after_error */
 #include "misc.h"
 #include "plot.h"
-#include "term_api.h"		/* for term_end_plot() used by graph_error(), also to detect enhanced mode */
 #include "variable.h"		/* For locale handling */
 #include "setshow.h"		/* for conv_text() */
 #include "tabulate.h"		/* for table_mode */
 
-#if defined(HAVE_DIRENT_H)
+#if defined(HAVE_DIRENT_H) && !defined(_WIN32)
 # include <sys/types.h>
 # include <dirent.h>
-#elif defined(_Windows)
-# include <windows.h>
-#endif
-#if defined(__MSC__) || defined (__WATCOMC__)
-# include <io.h>
 #endif
 
 /* Exported (set-table) variables */
@@ -65,8 +56,10 @@ char *decimalsign = NULL;
 /* degree sign.  Defaults to UTF-8 but will be changed to match encoding */
 char degree_sign[8] = "°";
 
-/* minus sign (encoding-specific string) */
+/* encoding-specific characters used by gprintf() */
+const char *micro = NULL;
 const char *minus_sign = NULL;
+TBOOLEAN use_micro = FALSE;
 TBOOLEAN use_minus_sign = FALSE;
 
 /* Holds the name of the current LC_NUMERIC as set by "set decimal locale" */
@@ -76,6 +69,12 @@ char *numeric_locale = NULL;
 char *current_locale = NULL;
 
 const char *current_prompt = NULL; /* to be set by read_line() */
+
+/* TRUE if command just typed; becomes FALSE whenever we
+ * send some other output to screen.  If FALSE, the command line
+ * will be echoed to the screen before the ^ error message.
+ */
+TBOOLEAN screen_ok;
 
 /* internal prototypes */
 
@@ -166,7 +165,7 @@ type_udv(int t_num)
 
     while (*udv_ptr) {
 	if (equals(t_num, (*udv_ptr)->udv_name)) {
-	    if ((*udv_ptr)->udv_undef)
+	    if ((*udv_ptr)->udv_value.type == NOTDEFINED)
 		return 0;
 	    else
 		return (*udv_ptr)->udv_value.type;
@@ -191,6 +190,22 @@ isletter(int t_num)
 	    (isalpha(c) || (c == '_') || ALLOWED_8BITVAR(c)));
 }
 
+/* Test whether following bit of command line might be parsable as a number.
+ * constant, defined variable, function, ...
+ */
+TBOOLEAN
+might_be_numeric(int t_num)
+{
+    if (END_OF_COMMAND)
+	return FALSE;
+    if (isanumber(t_num) || is_function(t_num))
+	return TRUE;
+    if (type_udv(t_num) == INTGR || type_udv(t_num) == CMPLX || type_udv(t_num) == ARRAY)
+	return TRUE;
+    if (equals(t_num, "("))
+	return TRUE;
+    return FALSE;
+}
 
 /*
  * is_definition() returns TRUE if the next tokens are of the form
@@ -259,42 +274,6 @@ token_len(int t_num)
     return (size_t)(token[t_num].length);
 }
 
-#ifdef NEXT
-/*
- * quote_str() no longer has any callers in the core code.
- * However, it is called by the next/openstep terminal.
- */
-
-/*
- * quote_str() does the same thing as copy_str, except it ignores the
- *   quotes at both ends.  This seems redundant, but is done for
- *   efficency.
- */
-void
-quote_str(char *str, int t_num, int max)
-{
-    int i = 0;
-    int start = token[t_num].start_index + 1;
-    int count;
-
-    if ((count = token[t_num].length - 2) >= max) {
-	count = max - 1;
-	FPRINTF((stderr, "str buffer overflow in quote_str"));
-    }
-    if (count > 0) {
-	do {
-	    str[i++] = gp_input_line[start++];
-	} while (i != count);
-    }
-    str[i] = NUL;
-    /* convert \t and \nnn (octal) to char if in double quotes */
-    if (gp_input_line[token[t_num].start_index] == '"')
-	parse_esc(str);
-    else
-	parse_sq(str);
-}
-#endif
-
 /*
  * capture() copies into str[] the part of gp_input_line[] which lies between
  * the begining of token[start] and end of token[end].
@@ -359,9 +338,7 @@ m_quote_capture(char **str, int start, int end)
 }
 
 /*
- * Wrapper for isstring + m_quote_capture that can be used with
- * or without GP_STRING_VARS enabled.
- * EAM Aug 2004
+ * Wrapper for isstring + m_quote_capture or const_string_express
  */
 char *
 try_to_get_string()
@@ -567,10 +544,16 @@ gprintf(
 
     *dest = '\0';
 
-    set_numeric_locale();
+    if (!evaluate_inside_using)
+	set_numeric_locale();
 
-    /* Oct 2013 - default format is now expected to be "%h" */
-    if (((term->flags & TERM_IS_LATEX)) && !strcmp(format, DEF_FORMAT))
+    /* Should never happen but fuzzer managed to hit it */
+    if (!format)
+	format = DEF_FORMAT;
+
+    /* By default we wrap numbers output to latex terminals in $...$ */
+    if (!strcmp(format, DEF_FORMAT)  && !table_mode
+    &&  ((term->flags & TERM_IS_LATEX)))
 	format = DEF_FORMAT_LATEX;
 
     for (;;) {
@@ -866,6 +849,11 @@ gprintf(
 		    /* HBB 20010121: avoid division of -ve ints! */
 		    power = (power + 24) / 3;
 		    snprintf(dest, remaining_space, temp, "yzafpnum kMGTPEZY"[power]);
+
+		    /* Replace u with micro character */
+		    if (use_micro && power == 6)
+			snprintf(dest, remaining_space, "%s%s", micro, &temp[2]);
+
 		} else {
 		    /* please extend the range ! */
 		    /* fall back to simple exponential */
@@ -926,15 +914,12 @@ gprintf(
 	    }
 	    /*}}} */
 	default:
-	   reset_numeric_locale();
 	   int_error(NO_CARET, "Bad format character");
 	} /* switch */
 	/*}}} */
 
-	if (got_hash && (format != strpbrk(format,"oeEfFgG"))) {
-	   reset_numeric_locale();
+	if (got_hash && (format != strpbrk(format,"oeEfFgG")))
 	   int_error(NO_CARET, "Bad format character");
-	}
 
     /* change decimal '.' to the actual entry in decimalsign */
 	if (decimalsign != NULL) {
@@ -1026,7 +1011,8 @@ done:
     /* Copy as much as fits */
     safe_strncpy(outstring, tempdest, count);
 
-    reset_numeric_locale();
+    if (!evaluate_inside_using)
+	reset_numeric_locale();
 }
 
 /*}}} */
@@ -1034,13 +1020,6 @@ done:
 /* some macros for the error and warning functions below
  * may turn this into a utility function later
  */
-#define PRINT_MESSAGE_TO_STDERR				\
-do {							\
-    fprintf(stderr, "\n%s%s\n",				\
-	    current_prompt ? current_prompt : "",	\
-	    gp_input_line);				\
-} while (0)
-
 #define PRINT_SPACES_UNDER_PROMPT		\
 do {						\
     const char *p;				\
@@ -1051,29 +1030,74 @@ do {						\
 	(void) fputc(' ', stderr);		\
 } while (0)
 
-#define PRINT_SPACES_UPTO_TOKEN						\
-do {									\
-    int i;								\
-									\
-    for (i = 0; i < token[t_num].start_index; i++)			\
-	(void) fputc((gp_input_line[i] == '\t') ? '\t' : ' ', stderr);	\
-} while(0)
+/*
+ * Echo back the command or data line that triggered an error,
+ * possibly with a caret indicating the token the was not accepted.
+ */
+static void
+print_line_with_error(int t_num)
+{
+    int i;
+    int true_line_num = inline_num;
 
-#define PRINT_CARET fputs("^\n",stderr);
+    if (t_num == DATAFILE) {
+	/* Print problem line from data file to the terminal */
+	df_showdata();
 
-#define PRINT_FILE_AND_LINE						\
-if (!interactive) {							\
-    if (lf_head && lf_head->name)                                       \
-	fprintf(stderr, "\"%s\", line %d: ", lf_head->name, inline_num);\
-    else fprintf(stderr, "line %d: ", inline_num);			\
+    } else {
+
+	/* If the current line was built by concatenation of lines inside */
+	/* a {bracketed clause}, try to reconstruct the true line number  */
+	/* FIXME:  This seems to no longer work reliably */
+	char *copy_of_input_line = gp_strdup(gp_input_line);
+	char *minimal_input_line = copy_of_input_line;
+	char *trunc;
+	while ((trunc = strrchr(copy_of_input_line, '\n')) != NULL) {
+	    int current = (t_num == NO_CARET) ? c_token : t_num;
+	    if (trunc < &copy_of_input_line[token[current].start_index]) {
+		minimal_input_line = trunc+1;
+		t_num = NO_CARET;
+		break;
+	    }
+	    *trunc = '\0';
+	    true_line_num--;
+	}
+
+	if (t_num != NO_CARET) {
+	    /* Refresh current command line */
+	    if (!screen_ok)
+		fprintf(stderr, "\n%s%s\n",
+		    current_prompt ? current_prompt : "",
+		    minimal_input_line);
+
+	    PRINT_SPACES_UNDER_PROMPT;
+
+	    /* Print spaces up to token */
+	    for (i = 0; i < token[t_num].start_index; i++)
+		fputc((minimal_input_line[i] == '\t') ? '\t' : ' ', stderr);
+
+	    /* Print token */
+	    fputs("^\n",stderr);
+	}
+	free(copy_of_input_line);
+    }
+
+    PRINT_SPACES_UNDER_PROMPT;
+
+    if (!interactive) {
+	LFS *lf = lf_head;
+	/* Back out of any nested if/else clauses */
+	while (lf && !lf->fp && !lf->name && lf->prev)
+	    lf = lf->prev;
+	if (lf && lf->name)
+	    fprintf(stderr, "\"%s\" ", lf->name);
+	fprintf(stderr, "line %d: ", true_line_num);
+    }
 }
 
-/* TRUE if command just typed; becomes FALSE whenever we
- * send some other output to screen.  If FALSE, the command line
- * will be echoed to the screen before the ^ error message.
+/*
+ * os_error() is just like int_error() except that it calls perror().
  */
-TBOOLEAN screen_ok;
-
 #if defined(VA_START) && defined(STDC_HEADERS)
 void
 os_error(int t_num, const char *str,...)
@@ -1090,17 +1114,8 @@ os_error(int t_num, const char *str, va_dcl)
 #endif /* VMS */
 
     /* reprint line if screen has been written to */
+    print_line_with_error(t_num);
 
-    if (t_num == DATAFILE) {
-	df_showdata();
-    } else if (t_num != NO_CARET) {	/* put caret under error */
-	if (!screen_ok)
-	    PRINT_MESSAGE_TO_STDERR;
-
-	PRINT_SPACES_UNDER_PROMPT;
-	PRINT_SPACES_UPTO_TOKEN;
-	PRINT_CARET;
-    }
     PRINT_SPACES_UNDER_PROMPT;
 
 #ifdef VA_START
@@ -1116,21 +1131,16 @@ os_error(int t_num, const char *str, va_dcl)
 #endif
     putc('\n', stderr);
 
-    PRINT_SPACES_UNDER_PROMPT;
-    PRINT_FILE_AND_LINE;
-
 #ifdef VMS
     status[1] = vaxc$errno;
     sys$putmsg(status);
-    (void) putc('\n', stderr);
 #else /* VMS */
-    perror("util.c");
-    putc('\n', stderr);
+    perror("system error");
 #endif /* VMS */
 
-    scanning_range_in_progress = FALSE;
-
-    bail_to_command_line();
+    putc('\n', stderr);
+    fill_gpval_string("GPVAL_ERRMSG", strerror(errno));
+    common_error_exit();
 }
 
 
@@ -1149,19 +1159,7 @@ int_error(int t_num, const char str[], va_dcl)
     char error_message[128] = {'\0'};
 
     /* reprint line if screen has been written to */
-
-    if (t_num == DATAFILE) {
-	df_showdata();
-    } else if (t_num != NO_CARET) { /* put caret under error */
-	if (!screen_ok)
-	    PRINT_MESSAGE_TO_STDERR;
-
-	PRINT_SPACES_UNDER_PROMPT;
-	PRINT_SPACES_UPTO_TOKEN;
-	PRINT_CARET;
-    }
-    PRINT_SPACES_UNDER_PROMPT;
-    PRINT_FILE_AND_LINE;
+    print_line_with_error(t_num);
 
 #ifdef VA_START
     VA_START(args, str);
@@ -1178,19 +1176,30 @@ int_error(int t_num, const char str[], va_dcl)
 #endif
 
     fputs("\n\n", stderr);
+    fill_gpval_string("GPVAL_ERRMSG", error_message);
+    common_error_exit();
+}
 
+
+void
+common_error_exit()
+{
     /* We are bailing out of nested context without ever reaching */
     /* the normal cleanup code. Reset any flags before bailing.   */
     df_reset_after_error();
     eval_reset_after_error();
     clause_reset_after_error();
     parse_reset_after_error();
+    set_iterator = cleanup_iteration(set_iterator);
+    plot_iterator = cleanup_iteration(plot_iterator);
     scanning_range_in_progress = FALSE;
     inside_zoom = FALSE;
+#ifdef HAVE_LOCALE_H
+    setlocale(LC_NUMERIC, "C");
+#endif
 
     /* Load error state variables */
     update_gpval_variables(2);
-    fill_gpval_string("GPVAL_ERRMSG", error_message);
 
     bail_to_command_line();
 }
@@ -1209,19 +1218,7 @@ int_warn(int t_num, const char str[], va_dcl)
 #endif
 
     /* reprint line if screen has been written to */
-
-    if (t_num == DATAFILE) {
-	df_showdata();
-    } else if (t_num != NO_CARET) { /* put caret under error */
-	if (!screen_ok)
-	    PRINT_MESSAGE_TO_STDERR;
-
-	PRINT_SPACES_UNDER_PROMPT;
-	PRINT_SPACES_UPTO_TOKEN;
-	PRINT_CARET;
-    }
-    PRINT_SPACES_UNDER_PROMPT;
-    PRINT_FILE_AND_LINE;
+    print_line_with_error(t_num);
 
     fputs("warning: ", stderr);
 #ifdef VA_START
@@ -1236,47 +1233,6 @@ int_warn(int t_num, const char str[], va_dcl)
     fprintf(stderr, str, a1, a2, a3, a4, a5, a6, a7, a8);
 #endif /* VA_START */
     putc('\n', stderr);
-}
-
-/*{{{  graph_error() */
-/* handle errors during graph-plot in a consistent way */
-/* HBB 20000430: move here, from graphics.c */
-#if defined(VA_START) && defined(STDC_HEADERS)
-void
-graph_error(const char *fmt, ...)
-#else
-void
-graph_error(const char *fmt, va_dcl)
-#endif
-{
-#ifdef VA_START
-    va_list args;
-#endif
-
-    multiplot = FALSE;
-    term_end_plot();
-
-#ifdef VA_START
-    VA_START(args, fmt);
-    /* HBB 20001120: instead, copy the core code from int_error() to
-     * here: */
-    PRINT_SPACES_UNDER_PROMPT;
-    PRINT_FILE_AND_LINE;
-
-# if defined(HAVE_VFPRINTF) || _LIBC
-    vfprintf(stderr, fmt, args);
-# else
-    _doprnt(fmt, args, stderr);
-# endif
-    va_end(args);
-    fputs("\n\n", stderr);
-
-    bail_to_command_line();
-    va_end(args);
-#else
-    int_error(NO_CARET, fmt, a1, a2, a3, a4, a5, a6, a7, a8);
-#endif
-
 }
 
 /*}}} */
@@ -1383,25 +1339,15 @@ parse_esc(char *instr)
 /* FIXME HH 20020915: This function does nothing if dirent.h and windows.h
  * not available. */
 TBOOLEAN
-existdir (const char *name)
+existdir(const char *name)
 {
-#ifdef HAVE_DIRENT_H
+#if defined(HAVE_DIRENT_H ) || defined(_WIN32)
     DIR *dp;
-    if (! (dp = opendir(name) ) )
+    if ((dp = opendir(name)) == NULL)
 	return FALSE;
 
     closedir(dp);
     return TRUE;
-#elif defined(_Windows)
-    HANDLE FileHandle;
-    WIN32_FIND_DATA finddata;
-
-    FileHandle = FindFirstFile(name, &finddata);
-    if (FileHandle != INVALID_HANDLE_VALUE) {
-	if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-	    return TRUE;
-    }
-    return FALSE;
 #elif defined(VMS)
     return FALSE;
 #else
@@ -1532,11 +1478,35 @@ strlen_utf8(const char *s)
     return j;
 }
 
+
+TBOOLEAN
+is_sjis_lead_byte(char c)
+{
+    unsigned int ch = (unsigned char) c;
+    return ((ch >= 0x81) && (ch <= 0x9f)) || ((ch >= 0xe1) && (ch <= 0xee));
+}
+
+
+size_t
+strlen_sjis(const char *s)
+{
+    int i = 0, j = 0;
+    while (s[i]) {
+	if (is_sjis_lead_byte(s[i])) i++; /* skip */
+	j++;
+	i++;
+    }
+    return j;
+}
+
+
 size_t
 gp_strlen(const char *s)
 {
     if (encoding == S_ENC_UTF8)
 	return strlen_utf8(s);
+    else if (encoding == S_ENC_SJIS)
+	return strlen_sjis(s);
     else
 	return strlen(s);
 }
@@ -1604,7 +1574,8 @@ strappend(char **dest, size_t *size, size_t len, const char *src)
     size_t destlen = (len != 0) ? len : strlen(*dest);
     size_t srclen = strlen(src);
     if (destlen + srclen + 1 > *size) {
-	*size *= 2;
+	while (destlen + srclen + 1 > *size)
+	    *size *= 2;
 	*dest = (char *) gp_realloc(*dest, *size, "strappend");
     }
     memcpy(*dest + destlen, src, srclen + 1);
@@ -1667,13 +1638,17 @@ value_to_str(struct value *val, TBOOLEAN need_quotes)
 	break;
     case DATABLOCK:
 	{
-	char **dataline = val->v.data_array;
-	int nlines = 0;
-	if (dataline != NULL) {
-	    while (*dataline++ != NULL)
-		nlines++;
+	sprintf(s[j], "<%d line data block>", datablock_size(val));
+	break;
 	}
-	sprintf(s[j], "<%d line data block>", nlines);
+    case ARRAY:
+	{
+	sprintf(s[j], "<%d element array>", val->v.value_array->v.int_val);
+	break;
+	}
+    case NOTDEFINED:
+	{
+	sprintf(s[j], "<undefined>");
 	break;
 	}
     default:

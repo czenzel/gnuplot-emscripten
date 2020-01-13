@@ -4,7 +4,7 @@
 ; Modified for 4.0, John Bollinger, 31 Dec 2002
 ; translated by Masahito Yamaga (ma@yama-ga.com) (for 3.7.2)
 ; translated by Shigeharu TAKENO 03/25 2006 (for 4.1)
-; $Id: wgnuplot-ja.mnu,v 1.3.4.2 2016/07/31 12:15:21 markisch Exp $
+; $Id: wgp410-sj.mnu,v 1.11 2017-09-05 18:18:20+09 shige Exp $
 
 [Menu]
 ファイル(&F)
@@ -217,6 +217,7 @@
 			[INPUT]First arg[EOS]?[INPUT]Second arg[EOS]:[INPUT]Third arg[EOS]
 	[EndMenu]
 [EndMenu]
+
 [Menu]
 関数(&N)
 	[Menu]
@@ -232,7 +233,7 @@
 			ceil([INPUT]Argument[EOS])
 		引数より大きくない最大の整数 (floor)
 			floor([INPUT]Argument[EOS])
-		整数 (int)
+		整数部分 (int)
 			int([INPUT]Argument[EOS])
 		--
 		平方根 (sqrt)
@@ -627,16 +628,26 @@
 	--
 	[Menu]
 	線、点の表示スタイル
+	ライスタイルをデフォルトへリセット
+		set style line [INPUT]Line Style Number?[EOS] default{ENTER}
+	ラインスタイル ...
+		set style line [INPUT]Line Style Number?[EOS] [EOS]
 	線の種類 (Line Type)
-		set style linetype [INPUT]Line Type?{ENTER}
+		lt [INPUT]Line Type?[EOS] [EOS]
+	点線/破線パターン (Dash Pattern)
+		dt [INPUT]Dash Pattern?[EOS] [EOS]
+	線の色 (Line Color)
+		lc [INPUT]Line Color?[EOS] [EOS]
 	線の幅 (Line Width)
-		set style linewidth [INPUT]Line Width?{ENTER}
+		lw [INPUT]Line Width?[EOS] [EOS]
 	点の種類 (Point Type)
-		set style pointtype [INPUT]Point Type?{ENTER}
+		pt [INPUT]Point Type?[EOS] [EOS]
 	点の大きさ (Point Size)
-		set style pointsize [INPUT]Point Size?{ENTER}
-;	3 次元描画用の色 (Palette)
-;		set style line{ENTER}
+		ps [INPUT]Point Size?[EOS] [EOS]
+	点同士の間隔
+		pointinterval [INPUT]Interval?[EOS] [EOS]
+	3 次元描画用の色 (Palette)
+		palette [EOS]
 	[EndMenu]
 	線、点のスタイルの表示
 		show style line{ENTER}
@@ -726,6 +737,10 @@
 ;   タイトル文字列内のセミコロンの次の数字はアイコンのインデックス。
 ;   MSDN の以下参照: "Toolbar Standard Button Image Index Values"
 ;   http://msdn.microsoft.com/en-us/library/bb760433%28v=vs.85%29.aspx
+;   代わりに、share/images への相対的な画像ファイルへのパスも与えられます。
+;   画像は ButtonSize (ピクセル単位) に縮尺されて読み込まれます。
+;[ButtonSize]
+;       24
 [Button]
 	再表示;4
 		replot{ENTER}
@@ -740,9 +755,9 @@
 		cd '[DIRECTORY]New directory?[EOS]'{ENTER}
 [Button]
 	印刷;14
-		set terminal [INPUT]Terminal type?{ENTER}set output "PRN"{ENTER}replot{ENTER}set terminal win{ENTER}set output{ENTER}
+		set term push;set terminal [INPUT]Terminal type?{ENTER}set output "PRN"{ENTER}replot{ENTER}set terminal pop{ENTER}unset output{ENTER}
 [Button]
-	ダンプ;14
+	ダンプ (win/wxt/qt);14
 		screendump{ENTER}
 [Button]
 	前;15

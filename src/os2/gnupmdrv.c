@@ -1,7 +1,3 @@
-#ifdef INCRCSDATA
-static char RCSid[]="$Id: gnupmdrv.c,v 1.6 2005/07/28 07:46:06 mikulik Exp $" ;
-#endif
-
 /****************************************************************************
 
     PROGRAM: gnupmdrv

@@ -1,5 +1,5 @@
 /*
- * $Id: alloc.h,v 1.14 2014/08/18 04:43:29 sfeam Exp $
+ * $Id: alloc.h,v 1.13 2014/04/04 19:11:17 sfeam Exp $
  */
 
 /* GNUPLOT - alloc.h */

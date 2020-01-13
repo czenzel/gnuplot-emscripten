@@ -1,5 +1,5 @@
 #ifndef lint
-static char *RCSid() { return RCSid("$Id: wgnuplib.c,v 1.9 2014/05/09 22:14:12 broeker Exp $"); }
+static char *RCSid() { return RCSid("$Id: wgnuplib.c,v 1.12 2016/07/21 09:07:44 markisch Exp $"); }
 #endif
 
 /* GNUPLOT - win/wgnuplib.c */
@@ -43,15 +43,19 @@ static char *RCSid() { return RCSid("$Id: wgnuplib.c,v 1.9 2014/05/09 22:14:12 b
 #include <ctype.h>
 #include <windows.h>
 #include <windowsx.h>
+#include <tchar.h>
+#include <wchar.h>
 #include "wgnuplib.h"
 #include "wresourc.h"
 #include "wcommon.h"
 
 HINSTANCE hdllInstance;
-LPSTR szParentClass = "wgnuplot_parent";
-LPSTR szTextClass = "wgnuplot_text";
-LPSTR szPauseClass = "wgnuplot_pause";
-LPSTR szGraphClass = "wgnuplot_graph";
+LPWSTR szParentClass = L"wgnuplot_parent";
+LPWSTR szTextClass = L"wgnuplot_text";
+LPWSTR szToolbarClass = L"wgnuplot_toolbar";
+LPWSTR szSeparatorClass = L"wgnuplot_separator";
+LPWSTR szPauseClass = L"wgnuplot_pause";
+LPTSTR szGraphClass = TEXT("wgnuplot_graph");
 
 /* Window ID */
 struct WID {
@@ -63,7 +67,7 @@ struct WID *widptr = NULL;
 unsigned int nwid = 0;
 HLOCAL hwid = 0;
 
-void NEAR *
+void *
 LocalAllocPtr(UINT flags, UINT size)
 {
 HLOCAL hlocal;
@@ -71,8 +75,8 @@ HLOCAL hlocal;
 	return (char *)LocalLock(hlocal);
 }
 
-void NEAR *
-LocalReAllocPtr(void NEAR * ptr, UINT flags, UINT size)
+void *
+LocalReAllocPtr(void * ptr, UINT flags, UINT size)
 {
 HLOCAL hlocal;
 	hlocal = LocalHandle(ptr);
@@ -82,7 +86,7 @@ HLOCAL hlocal;
 }
 
 void
-LocalFreePtr(void NEAR *ptr)
+LocalFreePtr(void *ptr)
 {
 HLOCAL hlocal;
 	hlocal = LocalHandle(ptr);
@@ -98,13 +102,13 @@ HLOCAL hlocal;
  *  otherwise NULL on failure.
  *  convert int is stored at pval.
  */
-LPSTR
-GetInt(LPSTR str, LPINT pval)
+LPTSTR
+GetInt(LPTSTR str, LPINT pval)
 {
     int val = 0;
     BOOL negative = FALSE;
     BOOL success = FALSE;
-    unsigned char ch;
+    TCHAR ch;
 
     if (!str)
 	return NULL;

@@ -163,6 +163,8 @@ void QtGnuplotScene::flushCurrentPointsItem()
 void QtGnuplotScene::update_key_box(const QRectF rect)
 {
 	if (m_currentPlotNumber > m_key_boxes.count()) {
+		// DEBUG Feb 2018 should no longer trigger
+		// because m_key_box insertion is done in layer code for GEAfterPlot
 		m_key_boxes.insert(m_currentPlotNumber, QtGnuplotKeybox(rect));
 	} else if (m_key_boxes[m_currentPlotNumber-1].isEmpty()) {
 		// Retain the visible/hidden flag when re-initializing the Keybox
@@ -186,7 +188,6 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 	if (type == GEClear)
 	{
 		resetItems();
-		m_preserve_visibility = false;
 	}
 	else if (type == GELineWidth)
 	{
@@ -266,7 +267,14 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 		QPolygonF polygon; in >> polygon;
 
 		if (!m_inKeySample)
+		{
+			// Distinguish between opaque and transparent pattern fill
+			if (m_currentFillStyle ==  FS_PATTERN)
+				m_currentPointsItem->addFilledPolygon(clipPolygon(polygon, false), 
+					QBrush(m_widget->backgroundColor()));
+
 			m_currentPointsItem->addFilledPolygon(clipPolygon(polygon, false), m_currentBrush);
+		}
 		else
 		{
 			flushCurrentPointsItem();
@@ -339,10 +347,10 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 		positionText(textItem, point);
 
 		QRectF rect = textItem->boundingRect();
-		if (m_textAlignment == Qt::AlignCenter) {
+		if (m_textAlignment & Qt::AlignCenter) {
 			rect.moveCenter(point);
 			rect.moveBottom(point.y());
-		} else if (m_textAlignment == Qt::AlignRight)
+		} else if (m_textAlignment & Qt::AlignRight)
 			rect.moveBottomRight(point);
 		else
 			rect.moveBottomLeft(point);
@@ -353,8 +361,11 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 		else
 			m_currentGroup.append(textItem);
 #ifdef EAM_BOXED_TEXT
-		if (m_inTextBox)
+		if (m_inTextBox) {
 			m_currentTextBox |= rect;
+			m_currentBoxRotation = m_textAngle;
+			m_currentBoxOrigin = point;
+		}
 #endif
 	}
 	else if (type == GEEnhancedFlush)
@@ -385,10 +396,10 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 		addItem(m_enhanced);
 
 		QRectF rect = m_enhanced->boundingRect();
-		if (m_textAlignment == Qt::AlignCenter) {
+		if (m_textAlignment & Qt::AlignCenter) {
 			rect.moveCenter(point);
 			rect.moveBottom(point.y());
-		} else if (m_textAlignment == Qt::AlignRight)
+		} else if (m_textAlignment & Qt::AlignRight)
 			rect.moveBottomRight(point);
 		else
 			rect.moveBottomLeft(point);
@@ -400,8 +411,11 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 		else
 			m_currentGroup.append(m_enhanced);
 #ifdef EAM_BOXED_TEXT
-		if (m_inTextBox)
+		if (m_inTextBox) {
 			m_currentTextBox |= rect;
+			m_currentBoxRotation = m_textAngle;
+			m_currentBoxOrigin = point;
+		}
 #endif
 		m_enhanced = 0;
 	}
@@ -448,7 +462,6 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 			m_zoomStopText->setPlainText(text); /// @todo font
 			m_zoomStopText->setPos(m_lastMousePos);
 			m_zoomRect->setRect(QRectF(m_zoomBoxCorner + QPointF(0.5, 0.5), m_lastMousePos + QPointF(0.5, 0.5)).normalized());
-			m_zoomRect->setZValue(32767);  // make sure guide box is on top
 		}
 	}
 	else if (type == GELineTo)
@@ -471,6 +484,7 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 	{
 		for (int i = 0; i < 4; i++)
 			in >> m_axisValid[i] >> m_axisMin[i] >> m_axisLower[i] >> m_axisScale[i] >> m_axisLog[i];
+		in >> m_axisValid[4];
 	}
 	else if (type == GEAfterPlot) 
 	{
@@ -486,6 +500,13 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 			// Store it in an ordered list so we can toggle it by index
 			m_plot_group.insert(m_currentPlotNumber, newgroup);
 		} 
+
+		if (m_currentPlotNumber >= m_key_boxes.count()) {
+			QRectF empty( QPointF(0,0), QPointF(0,0));
+			m_key_boxes.insert(m_currentPlotNumber,  empty);
+			m_key_boxes[m_currentPlotNumber-1].resetStatus();
+		}
+
 		m_currentPlotNumber = 0;
 	}
 	else if (type == GEPlotNumber) 
@@ -510,7 +531,6 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 		enum QtGnuplotModPlots ops = (enum QtGnuplotModPlots) ops_i;
 
 		/* FIXME: This shouldn't happen, but it does. */
-		/* Failure to reset lists after multiplot??   */
 		if (i > m_plot_group.count())
 		    i = m_plot_group.count();
 
@@ -598,18 +618,22 @@ void QtGnuplotScene::processEvent(QtGnuplotEventType type, QDataStream& in)
 				  m_textMargin.x(), m_textMargin.y());
 			rectItem = addRect(outline, m_currentPen, Qt::NoBrush);
 			rectItem->setZValue(m_currentZ++);
+			rectItem->setTransformOriginPoint(m_currentBoxOrigin);
+			rectItem->setRotation(-m_currentBoxRotation);
 			m_currentGroup.append(rectItem);
 			m_inTextBox = false;
 			break;
 		case TEXTBOX_BACKGROUNDFILL:
 			/* Fill bounding box */
-			m_currentBrush.setColor(m_widget->backgroundColor());
+			m_currentBrush.setColor(m_currentPen.color());
 			m_currentBrush.setStyle(Qt::SolidPattern);
 			outline = m_currentTextBox.adjusted(
 				 -m_textMargin.x(), -m_textMargin.y(),
 				  m_textMargin.x(), m_textMargin.y());
 			rectItem = addRect(outline, Qt::NoPen, m_currentBrush);
 			rectItem->setZValue(m_currentZ++);
+			rectItem->setTransformOriginPoint(m_currentBoxOrigin);
+			rectItem->setRotation(-m_currentBoxRotation);
 			m_currentGroup.append(rectItem);
 			m_inTextBox = false;
 			break;
@@ -647,10 +671,13 @@ void QtGnuplotScene::resetItems()
 
 	m_zoomRect = addRect(QRect(), QPen(QColor(0, 0, 0, 200)), QBrush(QColor(0, 0, 255, 40)));
 	m_zoomRect->setVisible(false);
+	m_zoomRect->setZValue(32767);       // make sure guide box is on top
 	m_zoomStartText = addText("");
 	m_zoomStopText  = addText("");
 	m_zoomStartText->setVisible(false);
 	m_zoomStopText->setVisible(false);
+	m_zoomStartText->setZValue(32767);  // make sure guide box annotation is on top
+	m_zoomStopText->setZValue(32767);
 	m_horizontalRuler = addLine(QLine(0, 0, width(), 0) , QPen(QColor(0, 0, 0, 200)));
 	m_verticalRuler   = addLine(QLine(0, 0, 0, height()), QPen(QColor(0, 0, 0, 200)));
 	m_lineTo          = addLine(QLine()                 , QPen(QColor(0, 0, 0, 200)));
@@ -670,6 +697,9 @@ void QtGnuplotScene::resetItems()
 	m_hypertextList.append(addRect(QRect(), QPen(QColor(0, 0, 0, 100)), QBrush(QColor(225, 225, 225, 200))));
 	m_hypertextList[0]->setVisible(false);
 
+	m_hyperimage = addPixmap(QPixmap());
+	m_hyperimage->setVisible(false);
+
 	m_plot_group.clear();	// Memory leak?  Destroy groups first?
 }
 
@@ -685,6 +715,7 @@ void QtGnuplotScene::setBrushStyle(int style)
 	int fillstyle = style & 0xf;
 
 	m_currentBrush.setStyle(Qt::SolidPattern);
+	m_currentFillStyle = fillstyle;
 
 	QColor color = m_currentPen.color();
 
@@ -703,7 +734,6 @@ void QtGnuplotScene::setBrushStyle(int style)
 		}
 	}
 	else if ((fillstyle == FS_TRANSPARENT_PATTERN) || (fillstyle == FS_PATTERN))
-		/// @todo color & transparent. See other terms
 		m_currentBrush.setStyle(QtGnuplot::brushes[abs(fillpar) % 8]);
 	else if (fillstyle == FS_EMPTY) // fill with background plot->color
 		color = m_widget->backgroundColor();
@@ -717,11 +747,11 @@ void QtGnuplotScene::positionText(QGraphicsItem* item, const QPoint& point)
 
 	double cx = 0.;
 	double cy = (item->boundingRect().bottom() + item->boundingRect().top())/2.;
-	if (m_textAlignment == Qt::AlignLeft)
+	if (m_textAlignment & Qt::AlignLeft)
 		cx = item->boundingRect().left();
-	else if (m_textAlignment == Qt::AlignRight)
+	else if (m_textAlignment & Qt::AlignRight)
 		cx = item->boundingRect().right();
-	else if (m_textAlignment == Qt::AlignCenter)
+	else if (m_textAlignment & Qt::AlignCenter)
 		cx = (item->boundingRect().right() + item->boundingRect().left())/2.;
 
 	item->setTransformOriginPoint(cx, cy);
@@ -787,21 +817,25 @@ void QtGnuplotScene::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
 	// Mousing for inactive widgets
 	if (!m_widget->isActive())
 	{
-		m_lineTo->hide();
-		QString status;
-		if (m_axisValid[0])
-			status += QString("x = ")
-			+ QString::number(sceneToGraph(0,event->scenePos().x()));
-		if (m_axisValid[1])
-			status += QString(" y = ")
-			+ QString::number(sceneToGraph(1,event->scenePos().y()));
-		if (m_axisValid[2])
-			status += QString(" x2 = ")
-			+ QString::number(sceneToGraph(2,event->scenePos().x()));
-		if (m_axisValid[3])
-			status += QString(" y2 = ")
-			+ QString::number(sceneToGraph(3,event->scenePos().y()));
-		m_widget->setStatusText(status);
+		if (m_axisValid[4])	{
+			; // 3D plot - no mouse coordinate update
+		} else {
+			m_lineTo->hide();
+			QString status;
+			if (m_axisValid[0])
+				status += QString("x = ")
+				+ QString::number(sceneToGraph(0,event->scenePos().x()));
+			if (m_axisValid[1])
+				status += QString(" y = ")
+				+ QString::number(sceneToGraph(1,event->scenePos().y()));
+			if (m_axisValid[2])
+				status += QString(" x2 = ")
+				+ QString::number(sceneToGraph(2,event->scenePos().x()));
+			if (m_axisValid[3])
+				status += QString(" y2 = ")
+				+ QString::number(sceneToGraph(3,event->scenePos().y()));
+			m_widget->setStatusText(status);
+		}
 		QGraphicsScene::mouseMoveEvent(event);
 		return;
 	}
@@ -827,8 +861,22 @@ void QtGnuplotScene::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
 			((QGraphicsRectItem *)m_hypertextList[0])->setRect(m_hypertextList[i]->boundingRect());
 			m_hypertextList[0]->setPos(m_hypertextList[i]->pos());
 			m_hypertextList[0]->setZValue(m_hypertextList[i]->zValue()-1);
+
+			// Special hypertext "image{(xsize,ysize)}:filename" 
+			QString current_text = ((QGraphicsTextItem *)(m_hypertextList[i]))->toPlainText();
+			if (current_text.startsWith("image")) {
+				int sep = current_text.indexOf(":");
+				QString imagename = current_text.mid(sep+1);
+				sep = imagename.indexOf("\n");
+				if (sep > 0)
+					imagename.truncate(sep);
+				m_hyperimage->setPixmap(QPixmap(imagename));
+				m_hyperimage->setVisible(true);
+				break;
+			}
 		} else {
 			m_hypertextList[i]->setVisible(false);
+			m_hyperimage->setVisible(false);
 		}
 	}
 	m_hypertextList[0]->setVisible(hit);
@@ -866,6 +914,7 @@ void QtGnuplotScene::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
 				    m_plot_group[i]->setVisible(true);
 				    m_key_boxes[i].setHidden(false);
 			    }
+			    m_preserve_visibility = true;
 			    break;
 		    }
 	    }
@@ -947,9 +996,14 @@ void QtGnuplotScene::keyPressEvent(QKeyEvent* event)
 			case Qt::Key_9        : key = GP_KP_9        ; break;
 		}
 	// ASCII keys
-	else if ((event->key() <= 0xff) && (!event->text().isEmpty()))
-		// event->key() does not respect the case
-		key = event->text()[0].toLatin1();
+	else if (event->key() <= 0xff) {
+		key = event->key();
+		// the core code is supposed handle upper/lower case by
+		// inspecting the Shift modifier, but currently that does not work
+		// so instead we check here for lowercase and pass it as text.
+		if (islower((event->text()[0].toLatin1())))
+			key = event->text()[0].toLatin1();
+	}
 	// Special keys
 	else
 		switch (event->key())
@@ -985,6 +1039,10 @@ void QtGnuplotScene::keyPressEvent(QKeyEvent* event)
 			case Qt::Key_F12        : key = GP_F12        ; break;
 		}
 
+	// The <tab> key is special.  We will catch it on keyRelease.
+	if (key == GP_Tab)
+		key = 0;
+
 	if (key >= 0)
 		live = m_eventHandler->postTermEvent(GE_keypress,
 			int(m_lastMousePos.x()), int(m_lastMousePos.y()), key, 0, m_widget);
@@ -1013,6 +1071,24 @@ void QtGnuplotScene::keyPressEvent(QKeyEvent* event)
 	}
 
 	QGraphicsScene::keyPressEvent(event);
+}
+
+/*
+ * Qt swallows the keyPress events from <tab> because it is used to
+ * cycle focus among a set of widgets. The documented methods for bypassing
+ * this focus-related theft are beyond my comprehension.  So instead we
+ * catch the key release event (for <tab> only) and pretend it was a press.
+ */
+void QtGnuplotScene::keyReleaseEvent(QKeyEvent* event)
+{
+	if (Qt::Key_Tab == event->key()) {
+		updateModifiers();
+		m_eventHandler->postTermEvent(GE_keypress,
+			int(m_lastMousePos.x()), int(m_lastMousePos.y()),
+			GP_Tab, 0, m_widget);
+	}
+
+	QGraphicsScene::keyReleaseEvent(event);
 }
 
 double QtGnuplotScene::sceneToGraph(int axis, double coord) const
